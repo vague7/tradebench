@@ -1,14 +1,21 @@
 import type { SubmissionStatus } from '../types/api';
 
-const LABELS: Record<SubmissionStatus, string> = {
-  UPLOADED: 'Uploaded',
-  BUILDING: 'Building',
-  RUNNING: 'Running',
-  BENCHMARKING: 'Benchmarking',
-  SCORED: 'Scored',
-  FAILED: 'Failed',
+const STATUS_CONFIG: Record<SubmissionStatus, { label: string; className: string }> = {
+  UPLOADED: { label: 'Uploaded', className: 'status-uploaded' },
+  BUILDING: { label: 'Building', className: 'status-building' },
+  RUNNING: { label: 'Running', className: 'status-running' },
+  BENCHMARKING: { label: 'Benchmarking', className: 'status-benchmarking' },
+  SCORED: { label: 'Scored', className: 'status-scored' },
+  FAILED: { label: 'Failed', className: 'status-failed' },
 };
 
 export function StatusBadge({ status }: { status: SubmissionStatus }) {
-  return <span className={`status-badge status-${status.toLowerCase()}`}>{LABELS[status]}</span>;
+  const config = STATUS_CONFIG[status];
+
+  return (
+    <span className={`status-badge ${config.className}`} aria-label={`Status: ${config.label}`}>
+      <span className="status-dot" />
+      {config.label}
+    </span>
+  );
 }

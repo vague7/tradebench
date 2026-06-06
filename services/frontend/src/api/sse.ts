@@ -1,47 +1,87 @@
-import { useEffect, useState } from 'react';
-
 import type { LeaderboardEntry, LeaderboardStreamPayload } from '../types/api';
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? '';
 
-export interface LeaderboardStreamState {
-  entries: LeaderboardEntry[];
-  connected: boolean;
-  error: string | null;
+export type SSEConnectionState = 'disconnected' | 'connecting' | 'connected' | 'error';
+
+export interface SSEEventHandlers {
+  onUpdate: (entries: LeaderboardEntry[]) => void;
+  onStateChange?: (state: SSEConnectionState) => void;
+  onError?: (message: string) => void;
 }
 
-export function useLeaderboardStream(): LeaderboardStreamState {
-  const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
-  const [connected, setConnected] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+/**
+ * Reusable SSE transport wrapper.
+ *
+ * Handles connection lifecycle (connect / disconnect / reconnect) for the
+ * leaderboard event stream. Contains zero business logic — only transport
+ * concerns. UI layers subscribe via the callback interface.
+ */
+export class LeaderboardSSEClient {
+  private source: EventSource | null = null;
+  private handlers: SSEEventHandlers;
+  private url: string;
+  private state: SSEConnectionState = 'disconnected';
 
-  useEffect(() => {
-    const source = new EventSource(`${API_BASE}/api/leaderboard/stream`);
+  constructor(handlers: SSEEventHandlers, url?: string) {
+    this.handlers = handlers;
+    this.url = url ?? `${API_BASE}/api/leaderboard/stream`;
+  }
+
+  /** Open the SSE connection. Safe to call when already connected (no-op). */
+  connect(): void {
+    if (this.source) {
+      return;
+    }
+
+    this.setState('connecting');
+
+    const source = new EventSource(this.url);
 
     source.onopen = () => {
-      setConnected(true);
-      setError(null);
+      this.setState('connected');
     };
 
     source.onerror = () => {
-      setConnected(false);
-      setError('Leaderboard stream disconnected');
+      this.setState('error');
+      this.handlers.onError?.('Leaderboard stream disconnected');
     };
 
     source.addEventListener('leaderboard_update', (event) => {
       const message = event as MessageEvent<string>;
       try {
         const payload = JSON.parse(message.data) as LeaderboardStreamPayload;
-        setEntries(payload.rankings);
+        this.handlers.onUpdate(payload.rankings);
       } catch {
-        setError('Failed to parse leaderboard update');
+        this.handlers.onError?.('Failed to parse leaderboard update');
       }
     });
 
-    return () => {
-      source.close();
-    };
-  }, []);
+    this.source = source;
+  }
 
-  return { entries, connected, error };
+  /** Close the SSE connection gracefully. */
+  disconnect(): void {
+    if (this.source) {
+      this.source.close();
+      this.source = null;
+    }
+    this.setState('disconnected');
+  }
+
+  /** Drop the current connection and open a fresh one. */
+  reconnect(): void {
+    this.disconnect();
+    this.connect();
+  }
+
+  /** Get the current connection state. */
+  getState(): SSEConnectionState {
+    return this.state;
+  }
+
+  private setState(next: SSEConnectionState): void {
+    this.state = next;
+    this.handlers.onStateChange?.(next);
+  }
 }

@@ -1,49 +1,35 @@
-# Bench Platform
+# Bench Platform - Distributed Benchmarking
 
-Repository baseline for the IICPC Summer Hackathon 2026 distributed benchmarking platform.
+This repository contains the complete **Day 1 Baseline** for the IICPC Summer Hackathon 2026 distributed benchmarking platform.
 
-## Repository Status
+## 🚀 Day 1 Accomplishments
 
-The initial scaffold is complete and organized for the three-engineer handoff. The repo is now ready to push to GitHub, and each engineer can branch from `main` and work on their own target area.
+We have successfully built and integrated the entire end-to-end microservices architecture:
+- **Frontend (`React / Vite`)**: A premium, light-themed SaaS interface with a custom SVG logo, live SSE leaderboard, and seamless file uploading.
+- **API Gateway (`Go`)**: The central entrypoint handling zip uploads, authentication, CORS, and orchestrating status flows.
+- **Sandbox Engine (`Go`)**: Dynamically builds user-submitted trading engines in isolated Docker containers, executes health checks, and manages lifecycle watchdogs.
+- **Bot Fleet (`Go`)**: Generates rapid, asynchronous load and adversarial trading scenarios against the submitted sandbox engines.
+- **Telemetry Ingester (`Go`)**: Ingests massive volumes of gRPC metrics from the Bot Fleet in real-time, calculates correctness, aggregates P99 latency, and computes the final benchmark score.
+- **Infrastructure**: A complete `docker-compose` orchestration featuring TimescaleDB (Postgres) and Redis.
 
+## 🛠️ How to Run
 
+1. **Start the Stack**: 
+   ```bash
+   docker compose up -d --build
+   ```
+2. **Access the Frontend**: Navigate to `http://localhost:3000`
+3. **Run a Benchmark**: 
+   - Enter a Team Name and Token.
+   - Upload your `test_sub.zip` containing your Dockerfile and source code.
+   - Watch the SSE stream update your UPLOADED -> BUILDING -> RUNNING -> BENCHMARKING -> SCORED phases in real-time!
 
-## Layout
+## 📂 Repository Layout
 
-- `shared/` frozen contracts shared across services
-- `shared/proto/` gRPC interface definitions
-- `migrations/` append-only database migrations
-- `scripts/gen_proto.sh` proto regeneration entrypoint
-
-## Notes
-
-- Go version: 1.22
-- Shared contracts are frozen after Day Zero unless all engineers agree on a schema change.
-- Service scaffolds are added in later phases.
-
-## Day 1 Ownership
-
-### Engineer 1
-
-- Build the `api-gateway` upload, status, results, leaderboard, and admin endpoints.
-- Implement auth middleware, upload size enforcement, and the database/Redis store layer.
-- Finish the sandbox runner flow in `sandbox-engine`, including Docker build, container spawn, health checks, and watchdog cleanup.
-- Commit the initial migration files and keep schema changes append-only.
-
-### Engineer 2
-
-- Implement `bot-fleet` load generation, adversarial scenarios, and gRPC streaming to telemetry.
-- Implement `telemetry-ingester` buffering, aggregation, scoring, correctness validation, and DB writes.
-- Finalize the composite score formula and the reference-engine integration path.
-
-### Engineer 3
-
-- Build the React/Vite frontend for submission upload and status polling.
-- Add the live leaderboard SSE view and the typed API client wiring.
-- Maintain the Docker Compose integration, frontend build, and the dummy submission used for end-to-end checks.
-
-### Working Agreement
-
-- All engineers branch from `main` after this scaffold is pushed.
-- Shared contracts in `shared/` remain frozen unless all three engineers agree to a schema change.
-- New work should stay inside the ownership boundaries defined in the PRD.
+- `services/frontend/` - React SPA (Vite, Nginx)
+- `services/api-gateway/` - Core API (Go)
+- `services/sandbox-engine/` - Docker orchestration (Go)
+- `services/bot-fleet/` - Load generator (Go)
+- `services/telemetry-ingester/` - Metrics & Scoring engine (Go)
+- `shared/` - Frozen data contracts and generated gRPC protobufs
+- `scripts/` - Utilities for e2e testing and proto generation

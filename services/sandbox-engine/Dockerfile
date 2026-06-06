@@ -2,9 +2,9 @@ FROM golang:1.22-alpine AS builder
 WORKDIR /app
 COPY go.work go.work.sum ./
 COPY shared/ ./shared/
-COPY services/sandbox-engine/ ./services/sandbox-engine/
+COPY services/ ./services/
 WORKDIR /app/services/sandbox-engine
-RUN go build -o /bin/service ./...
+RUN go build -o /bin/service .
 
 FROM alpine:3.19
 RUN adduser -D -u 1001 appuser

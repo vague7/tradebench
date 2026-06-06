@@ -1,6 +1,7 @@
 FROM node:20-alpine AS builder
 WORKDIR /app
 COPY package.json tsconfig.json vite.config.ts index.html ./
+COPY public ./public
 COPY src ./src
 ARG VITE_API_BASE=http://localhost:8080
 ENV VITE_API_BASE=${VITE_API_BASE}
