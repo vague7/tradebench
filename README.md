@@ -6,9 +6,7 @@ Repository baseline for the IICPC Summer Hackathon 2026 distributed benchmarking
 
 The initial scaffold is complete and organized for the three-engineer handoff. The repo is now ready to push to GitHub, and each engineer can branch from `main` and work on their own target area.
 
-## Phase 1 Scaffold
 
-This repository currently contains the root contracts, shared module, proto definitions, migrations, and generation scripts required for the Day Zero baseline.
 
 ## Layout
 
