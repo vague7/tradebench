@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+package botfleet;
+
+option go_package = "github.com/bench/shared/proto/gen";
+
+service BotFleet {
+  rpc StartBenchmark(BenchmarkConfig) returns (Ack);
+  rpc StopBenchmark(StopRequest) returns (Ack);
+}
+
+message BenchmarkConfig {
+  string submission_id = 1;
+  string target_host = 2;
+  int32 bot_count = 3;
+  int32 duration_sec = 4;
+}
+
+message StopRequest {
+  string submission_id = 1;
+}
+
+message Ack {
+  bool ok = 1;
+}

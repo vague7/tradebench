@@ -1,0 +1,273 @@
+:root {
+  color-scheme: dark;
+  font-family: 'Space Grotesk', 'Segoe UI', sans-serif;
+  background:
+    radial-gradient(circle at top left, rgba(70, 112, 255, 0.25), transparent 30%),
+    radial-gradient(circle at right, rgba(0, 224, 188, 0.2), transparent 25%),
+    linear-gradient(180deg, #09111f 0%, #0c1324 42%, #07101d 100%);
+  color: #eef4ff;
+  line-height: 1.5;
+  font-weight: 400;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background: transparent;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.app-shell {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+  margin-bottom: 28px;
+}
+
+.topbar h2,
+.hero-panel h1 {
+  margin: 0;
+  letter-spacing: -0.03em;
+}
+
+.hero-panel h1 {
+  font-size: clamp(2rem, 3.6vw, 4rem);
+  max-width: 14ch;
+}
+
+.eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  font-size: 0.72rem;
+  color: #87a5ff;
+  margin: 0 0 10px;
+}
+
+.lead,
+.inline-note {
+  color: rgba(238, 244, 255, 0.78);
+  max-width: 68ch;
+}
+
+.switcher {
+  display: flex;
+  gap: 10px;
+  padding: 6px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.switcher button,
+.secondary-button,
+.upload-form button {
+  border: 0;
+  border-radius: 999px;
+  padding: 12px 18px;
+  color: #eef4ff;
+  background: rgba(255, 255, 255, 0.08);
+  transition: transform 160ms ease, background 160ms ease, opacity 160ms ease;
+}
+
+.switcher button.active,
+.upload-form button {
+  background: linear-gradient(135deg, #4f7cff 0%, #2ec9a0 100%);
+  color: #07101d;
+  font-weight: 700;
+}
+
+.switcher button:hover,
+.secondary-button:hover,
+.upload-form button:hover {
+  transform: translateY(-1px);
+}
+
+.page-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(320px, 0.95fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.stack {
+  display: grid;
+  gap: 16px;
+}
+
+.panel,
+.table-shell {
+  background: rgba(7, 16, 29, 0.74);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 24px;
+  box-shadow: 0 20px 80px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(20px);
+}
+
+.panel {
+  padding: 24px;
+}
+
+.hero-panel {
+  min-height: 100%;
+}
+
+.hero-status,
+.status-grid,
+.metrics-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.status-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.status-grid dt,
+.metric-label {
+  color: rgba(238, 244, 255, 0.64);
+  font-size: 0.85rem;
+}
+
+.status-grid dd,
+.metric-value {
+  margin: 4px 0 0;
+  font-size: 1rem;
+  word-break: break-word;
+}
+
+.metrics-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.metric-card {
+  padding: 16px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.upload-form {
+  display: grid;
+  gap: 14px;
+}
+
+.upload-form label,
+.token-panel {
+  display: grid;
+  gap: 8px;
+}
+
+.upload-form input,
+.token-panel input {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #eef4ff;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.upload-form input::file-selector-button {
+  border: 0;
+  border-radius: 999px;
+  margin-right: 12px;
+  padding: 8px 14px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #eef4ff;
+}
+
+.form-error {
+  margin: 0;
+  color: #ff8ea3;
+}
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 12px;
+  border-radius: 999px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  width: fit-content;
+}
+
+.status-uploaded,
+.status-building,
+.status-running,
+.status-benchmarking,
+.status-scored,
+.status-failed {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.table-shell {
+  overflow: auto;
+}
+
+.leaderboard-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.leaderboard-table th,
+.leaderboard-table td {
+  padding: 14px 16px;
+  text-align: left;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.leaderboard-table th {
+  font-size: 0.76rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: rgba(238, 244, 255, 0.55);
+  position: sticky;
+  top: 0;
+  background: rgba(7, 16, 29, 0.94);
+}
+
+.empty-row {
+  text-align: center;
+  color: rgba(238, 244, 255, 0.6);
+  padding: 36px 16px;
+}
+
+@media (max-width: 980px) {
+  .page-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .topbar {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .status-grid,
+  .metrics-grid {
+    grid-template-columns: 1fr;
+  }
+}

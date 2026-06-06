@@ -1,0 +1,9 @@
+.env
+*/bin/
+node_modules/
+__debug_bin
+dist/
+*.exe
+*.test
+*.out
+.DS_Store

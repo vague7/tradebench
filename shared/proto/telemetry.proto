@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package telemetry;
+
+option go_package = "github.com/bench/shared/proto/gen";
+
+import "google/protobuf/timestamp.proto";
+
+service TelemetryIngester {
+  rpc StreamEvents(stream BotEventProto) returns (Ack);
+}
+
+message Fill {
+  double price = 1;
+  double quantity = 2;
+  string side = 3;
+}
+
+message BotEventProto {
+  string submission_id = 1;
+  string bot_id = 2;
+  string order_id = 3;
+  string order_type = 4;
+  google.protobuf.Timestamp sent_at = 5;
+  google.protobuf.Timestamp acked_at = 6;
+  int32 http_status = 7;
+  Fill expected_fill = 8;
+  Fill actual_fill = 9;
+}
+
+message Ack {
+  bool ok = 1;
+}

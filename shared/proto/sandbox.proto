@@ -1,0 +1,29 @@
+syntax = "proto3";
+
+package sandbox;
+
+option go_package = "github.com/bench/shared/proto/gen";
+
+service SandboxEngine {
+  rpc GetStatus(StatusRequest) returns (StatusResponse);
+  rpc KillContainer(KillRequest) returns (Ack);
+}
+
+message StatusRequest {
+  string submission_id = 1;
+}
+
+message KillRequest {
+  string submission_id = 1;
+}
+
+message StatusResponse {
+  string submission_id = 1;
+  string status = 2;
+  string container_id = 3;
+  string error_message = 4;
+}
+
+message Ack {
+  bool ok = 1;
+}
