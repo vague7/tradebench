@@ -6,21 +6,20 @@ import (
 	"strconv"
 )
 
+// Config holds all telemetry-ingester configuration loaded from environment variables.
 type Config struct {
-	PostgresDSN       string
-	RedisAddr         string
-	TelemetryWindowSec int
-	BotTargetTPS      int
-	BotMaxP99Ms       int
+	PostgresDSN    string // POSTGRES_DSN: PostgreSQL connection string
+	WindowSec      int    // TELEMETRY_WINDOW_SEC: aggregation window size in seconds
+	GRPCListenAddr string // TELEMETRY_GRPC_ADDR: address to listen on (e.g. ":9003")
 }
 
+// Load reads all required environment variables and returns a Config.
+// It panics immediately on any missing or unparseable required variable.
 func Load() *Config {
 	return &Config{
-		PostgresDSN:        required("POSTGRES_DSN"),
-		RedisAddr:          required("REDIS_ADDR"),
-		TelemetryWindowSec: requiredInt("TELEMETRY_WINDOW_SEC"),
-		BotTargetTPS:       requiredInt("BOT_TARGET_TPS"),
-		BotMaxP99Ms:        requiredInt("BOT_MAX_P99_MS"),
+		PostgresDSN:    required("POSTGRES_DSN"),
+		WindowSec:      requiredInt("TELEMETRY_WINDOW_SEC"),
+		GRPCListenAddr: required("TELEMETRY_GRPC_ADDR"),
 	}
 }
 
