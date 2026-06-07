@@ -10,6 +10,8 @@ import (
 	"github.com/bench/api-gateway/config"
 	"github.com/bench/api-gateway/handlers"
 	"github.com/bench/api-gateway/store"
+	"github.com/bench/api-gateway/trigger"
+
 )
 
 func corsMiddleware(next http.Handler) http.Handler {
@@ -28,14 +30,7 @@ func corsMiddleware(next http.Handler) http.Handler {
 }
 
 func main() {
-	slog.SetDefault(
-		slog.New(
-			slog.NewJSONHandler(
-				os.Stdout,
-				&slog.HandlerOptions{Level: slog.LevelInfo},
-			),
-		),
-	)
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})))
 
 	cfg := config.Load()
 	ctx := context.Background()
@@ -51,15 +46,17 @@ func main() {
 	}
 	defer redisClient.Close()
 
-	mux := http.NewServeMux()
+	// Start the ready-event watcher; triggers bot-fleet when a container is healthy.
+	watcher := trigger.NewWatcher(redisClient.Client())
+	go watcher.Run(ctx)
 
+	mux := http.NewServeMux()
 	handlers.NewSubmissionHandler(cfg, postgresStore, redisClient).Register(mux)
 	handlers.NewLeaderboardHandler(cfg, postgresStore, redisClient).Register(mux)
 	handlers.NewAdminHandler(cfg, postgresStore, redisClient).Register(mux)
 
 	slog.Info("api-gateway starting", "addr", ":8080")
-
-	if err := http.ListenAndServe(":8080", corsMiddleware(mux)); err != nil {
+	if err := http.ListenAndServe(":8080",corsMiddleware(mux)); err != nil {
 		log.Fatal(err)
 	}
 }

@@ -37,3 +37,8 @@ func (r *RedisClient) EnqueueJob(ctx context.Context, fields map[string]string) 
 func (r *RedisClient) Close() error {
 	return r.client.Close()
 }
+
+// Client exposes the underlying redis client for use outside the store package.
+func (r *RedisClient) Client() *redis.Client {
+	return r.client
+}
