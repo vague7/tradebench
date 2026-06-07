@@ -32,26 +32,36 @@ func main() {
 	spawner := runner.NewSpawner(cfg.BenchNetName)
 	healthChecker := runner.NewHealthChecker(time.Duration(cfg.SandboxHealthTimeout) * time.Second)
 	watchdog := runner.NewWatchdog(time.Duration(cfg.SandboxContainerTTL) * time.Second)
+	registry := runner.NewRegistry()
+	db := runner.NewPostgresStatusUpdater(os.Getenv("POSTGRES_DSN"))
 
-	// Watchdog polling goroutine.
+	// Watchdog: poll registry every 10s, kill containers past TTL.
 	go func() {
 		ticker := time.NewTicker(10 * time.Second)
 		defer ticker.Stop()
-		// containerStartTimes would come from a shared registry in a full impl;
-		// this goroutine is wired and ready to be extended.
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case now := <-ticker.C:
-				_ = watchdog.ShouldKill(now, now) // placeholder — replace with real container registry
+				for subID, entry := range registry.Snapshot() {
+					if watchdog.ShouldKill(entry.StartedAt, now) {
+						slog.Info("watchdog: TTL exceeded, killing container",
+							"submissionId", subID,
+							"containerID", entry.ContainerID,
+						)
+						if err := healthChecker.KillAndRemove(entry.ContainerID); err != nil {
+							slog.Error("watchdog: kill failed", "containerID", entry.ContainerID, "err", err)
+						}
+						registry.Remove(subID)
+						_ = db.UpdateStatus(context.Background(), subID, "FAILED", "container TTL exceeded")
+					}
+				}
 			}
 		}
 	}()
 
-	db := runner.NewPostgresStatusUpdater(os.Getenv("POSTGRES_DSN"))
-
-	consumer := queue.NewConsumer(rdb, builder, spawner, healthChecker, db)
+	consumer := queue.NewConsumer(rdb, builder, spawner, healthChecker, db, registry, cfg.SandboxMaxConcurrent)
 
 	slog.Info("sandbox-engine starting",
 		"benchNetName", cfg.BenchNetName,
@@ -59,21 +69,9 @@ func main() {
 		"buildTimeoutSec", cfg.SandboxBuildTimeout,
 		"healthTimeoutSec", cfg.SandboxHealthTimeout,
 		"containerTTLsec", cfg.SandboxContainerTTL,
-		)
+	)
 
 	if err := consumer.Run(ctx); err != nil && err != context.Canceled {
 		log.Fatal(err)
 	}
-}_ = builder
-_ = spawner
-_ = healthChecker
-_ = watchdog
-
-if err := consumer.Run(ctx); err != nil && err != context.Canceled {
-	log.Fatal(err)
 }
-}
-
-
-
-
