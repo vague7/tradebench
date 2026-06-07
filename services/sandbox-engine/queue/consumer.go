@@ -22,31 +22,45 @@ type StatusUpdater interface {
 }
 
 type Consumer struct {
-	rdb     *redis.Client
-	builder *runner.Builder
-	spawner *runner.Spawner
-	health  *runner.HealthChecker
-	db      StatusUpdater
+	rdb      *redis.Client
+	builder  *runner.Builder
+	spawner  *runner.Spawner
+	health   *runner.HealthChecker
+	db       StatusUpdater
+	registry *runner.Registry
+	sem      chan struct{} // concurrency limiter
 }
 
-func NewConsumer(rdb *redis.Client, builder *runner.Builder, spawner *runner.Spawner, health *runner.HealthChecker, db StatusUpdater) *Consumer {
+func NewConsumer(
+	rdb *redis.Client,
+	builder *runner.Builder,
+	spawner *runner.Spawner,
+	health *runner.HealthChecker,
+	db StatusUpdater,
+	registry *runner.Registry,
+	maxConcurrent int,
+) *Consumer {
+	if maxConcurrent <= 0 {
+		maxConcurrent = 1
+	}
 	return &Consumer{
-		rdb:     rdb,
-		builder: builder,
-		spawner: spawner,
-		health:  health,
-		db:      db,
+		rdb:      rdb,
+		builder:  builder,
+		spawner:  spawner,
+		health:   health,
+		db:       db,
+		registry: registry,
+		sem:      make(chan struct{}, maxConcurrent),
 	}
 }
 
 func (c *Consumer) Run(ctx context.Context) error {
-	// Ensure consumer group exists (ignore BUSYGROUP error if already created).
 	err := c.rdb.XGroupCreateMkStream(ctx, jobStreamKey, consumerGroup, "0").Err()
 	if err != nil && err.Error() != "BUSYGROUP Consumer Group name already exists" {
 		return fmt.Errorf("consumer: create group: %w", err)
 	}
 
-	slog.Info("consumer: listening", "stream", jobStreamKey, "group", consumerGroup)
+	slog.Info("consumer: listening", "stream", jobStreamKey, "group", consumerGroup, "maxConcurrent", cap(c.sem))
 
 	for {
 		select {
@@ -76,13 +90,22 @@ func (c *Consumer) Run(ctx context.Context) error {
 
 		for _, stream := range streams {
 			for _, msg := range stream.Messages {
-				if err := c.process(ctx, msg); err != nil {
-					slog.Error("consumer: process failed", "msgId", msg.ID, "err", err)
-					// Leave the message in PEL for redelivery; don't ACK.
-					continue
+				// Acquire slot — blocks if at capacity.
+				select {
+				case c.sem <- struct{}{}:
+				case <-ctx.Done():
+					return ctx.Err()
 				}
-				// ACK on success.
-				_ = c.rdb.XAck(ctx, jobStreamKey, consumerGroup, msg.ID).Err()
+
+				go func(m redis.XMessage) {
+					defer func() { <-c.sem }() // release slot when done
+
+					if err := c.process(ctx, m); err != nil {
+						slog.Error("consumer: process failed", "msgId", m.ID, "err", err)
+						return // leave in PEL for redelivery
+					}
+					_ = c.rdb.XAck(ctx, jobStreamKey, consumerGroup, m.ID).Err()
+				}(msg)
 			}
 		}
 	}
@@ -99,38 +122,38 @@ func (c *Consumer) process(ctx context.Context, msg redis.XMessage) error {
 
 	imageTag := "bench-submission-" + submissionID
 
-	// BUILDING
-	if err := c.db.UpdateStatus(ctx, submissionID, "BUILDING", ""); err != nil {
-		slog.Warn("consumer: failed to set BUILDING status", "submissionId", submissionID, "err", err)
-	}
+	_ = c.db.UpdateStatus(ctx, submissionID, "BUILDING", "")
 	if err := c.builder.Build(zipPath, imageTag); err != nil {
 		_ = c.db.UpdateStatus(ctx, submissionID, "FAILED", err.Error())
-		return fmt.Errorf("consumer: build failed: %w", err)
+		return fmt.Errorf("consumer: build: %w", err)
 	}
 
-	// RUNNING
-	if err := c.db.UpdateStatus(ctx, submissionID, "RUNNING", ""); err != nil {
-		slog.Warn("consumer: failed to set RUNNING status", "submissionId", submissionID, "err", err)
-	}
-	containerID, _, err := c.spawner.Spawn(imageTag, submissionID)
+	_ = c.db.UpdateStatus(ctx, submissionID, "RUNNING", "")
+	containerID, port, err := c.spawner.Spawn(imageTag, submissionID)
 	if err != nil {
 		_ = c.db.UpdateStatus(ctx, submissionID, "FAILED", err.Error())
-		return fmt.Errorf("consumer: spawn failed: %w", err)
+		return fmt.Errorf("consumer: spawn: %w", err)
 	}
+
+	// Register before health check so watchdog can clean up on timeout.
+	c.registry.Add(submissionID, containerID, port, time.Now())
 
 	if err := c.health.WaitReady(ctx, containerID); err != nil {
-		_ = c.db.UpdateStatus(ctx, submissionID, "FAILED", "container failed health check: "+err.Error())
-		return fmt.Errorf("consumer: health check failed: %w", err)
+		_ = c.db.UpdateStatus(ctx, submissionID, "FAILED", "health check failed: "+err.Error())
+		c.registry.Remove(submissionID)
+		return fmt.Errorf("consumer: health: %w", err)
 	}
 
-	if err := c.db.UpdateStatus(ctx, submissionID, "BENCHMARKING", ""); err != nil {
-		slog.Warn("consumer: failed to set BENCHMARKING status", "submissionId", submissionID, "err", err)
-	}
+	_ = c.db.UpdateStatus(ctx, submissionID, "BENCHMARKING", "")
 
-	slog.Info("consumer: submission ready for benchmarking",
+	// Publish ready event for api-gateway to trigger bot-fleet.
+	readyKey := "submission:" + submissionID + ":ready"
+	_ = c.rdb.Set(ctx, readyKey, fmt.Sprintf("%s:%d", containerID, port), 10*time.Minute).Err()
+
+	slog.Info("consumer: container ready",
 		"submissionId", submissionID,
 		"containerID", containerID,
-		"imageTag", imageTag,
-		)
+		"port", port,
+	)
 	return nil
 }
