@@ -6,20 +6,19 @@ import (
 	"strconv"
 )
 
+// Config holds all bot-fleet configuration loaded from environment variables.
 type Config struct {
-	BotDefaultCount int
-	BotTimeoutMs    int
-	BotTargetTPS    int
-	BotMaxP99Ms     int
-	TelemetryAddr   string
+	BotDefaultCount int    // BOT_DEFAULT_COUNT: default concurrent bots
+	BotTimeoutMs    int    // BOT_TIMEOUT_MS: per-request timeout in milliseconds
+	TelemetryAddr   string // TELEMETRY_ADDR: gRPC address of telemetry-ingester
 }
 
+// Load reads all required environment variables and returns a Config.
+// It panics immediately on any missing or unparseable required variable.
 func Load() *Config {
 	return &Config{
 		BotDefaultCount: requiredInt("BOT_DEFAULT_COUNT"),
 		BotTimeoutMs:    requiredInt("BOT_TIMEOUT_MS"),
-		BotTargetTPS:    requiredInt("BOT_TARGET_TPS"),
-		BotMaxP99Ms:     requiredInt("BOT_MAX_P99_MS"),
 		TelemetryAddr:   required("TELEMETRY_ADDR"),
 	}
 }
