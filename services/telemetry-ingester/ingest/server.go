@@ -1,48 +1,83 @@
 package ingest
 
 import (
-	"context"
-	"fmt"
-	"sync"
-	"time"
+	"io"
+	"log/slog"
 
-	benchtypes "github.com/bench/shared/types"
+	"github.com/bench/shared/proto/gen"
+	"github.com/bench/shared/types"
+	"google.golang.org/grpc"
 )
 
+// Server implements the TelemetryIngester gRPC service.
+// It receives a BotEvent stream from bot-fleet and pushes events into the ring buffer.
 type Server struct {
-	mu      sync.Mutex
-	buffer  *Buffer
-	windows map[string][]benchtypes.BotEvent
+	gen.UnimplementedTelemetryIngesterServer
+	buf *RingBuffer
 }
 
-func NewServer(buffer *Buffer) *Server {
-	return &Server{buffer: buffer, windows: make(map[string][]benchtypes.BotEvent)}
+// NewServer creates a new gRPC telemetry ingester server backed by the given ring buffer.
+func NewServer(buf *RingBuffer) *Server {
+	return &Server{buf: buf}
 }
 
-func (s *Server) StreamEvent(ctx context.Context, event benchtypes.BotEvent) error {
-	if s.buffer == nil {
-		return fmt.Errorf("ingest: buffer is required")
+// StreamEvents receives a client-streaming BotEventProto stream from bot-fleet.
+// Each received message is converted to types.BotEvent and pushed into the ring buffer.
+// If the buffer is full, the event is dropped and a warning is logged.
+func (s *Server) StreamEvents(stream grpc.ClientStreamingServer[gen.BotEventProto, gen.Ack]) error {
+	for {
+		proto, err := stream.Recv()
+		if err == io.EOF {
+			return stream.SendAndClose(&gen.Ack{Ok: true})
+		}
+		if err != nil {
+			slog.Error("failed to receive event from stream", "err", err)
+			return err
+		}
+
+		event := protoToBotEvent(proto)
+
+		if !s.buf.Push(event) {
+			slog.Warn("buffer full, dropping event",
+				"botId", event.BotID,
+				"submissionId", event.SubmissionID,
+			)
+		}
 	}
-	if err := s.buffer.Push(ctx, event); err != nil {
-		return err
+}
+
+// protoToBotEvent converts a BotEventProto message to a types.BotEvent.
+func protoToBotEvent(p *gen.BotEventProto) types.BotEvent {
+	event := types.BotEvent{
+		SubmissionID: p.GetSubmissionId(),
+		BotID:        p.GetBotId(),
+		OrderID:      p.GetOrderId(),
+		OrderType:    types.OrderType(p.GetOrderType()),
+		HTTPStatus:   int(p.GetHttpStatus()),
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.windows[event.SubmissionID] = append(s.windows[event.SubmissionID], event)
-	return nil
-}
+	if p.GetSentAt() != nil {
+		event.SentAt = p.GetSentAt().AsTime()
+	}
+	if p.GetAckedAt() != nil {
+		event.AckedAt = p.GetAckedAt().AsTime()
+	}
 
-func (s *Server) Snapshot(submissionID string) []benchtypes.BotEvent {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	if ef := p.GetExpectedFill(); ef != nil {
+		event.ExpectedFill = types.Fill{
+			Price:    ef.GetPrice(),
+			Quantity: ef.GetQuantity(),
+			Side:     ef.GetSide(),
+		}
+	}
 
-	events := s.windows[submissionID]
-	clone := make([]benchtypes.BotEvent, len(events))
-	copy(clone, events)
-	return clone
-}
+	if af := p.GetActualFill(); af != nil {
+		event.ActualFill = types.Fill{
+			Price:    af.GetPrice(),
+			Quantity: af.GetQuantity(),
+			Side:     af.GetSide(),
+		}
+	}
 
-func (s *Server) WindowEnd() time.Time {
-	return time.Now().UTC()
+	return event
 }

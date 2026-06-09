@@ -27,8 +27,8 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type BotFleetClient interface {
-	StartBenchmark(ctx context.Context, in *BenchmarkConfig, opts ...grpc.CallOption) (*Ack, error)
-	StopBenchmark(ctx context.Context, in *StopRequest, opts ...grpc.CallOption) (*Ack, error)
+	StartBenchmark(ctx context.Context, in *BenchmarkConfig, opts ...grpc.CallOption) (*BotFleetAck, error)
+	StopBenchmark(ctx context.Context, in *StopRequest, opts ...grpc.CallOption) (*BotFleetAck, error)
 }
 
 type botFleetClient struct {
@@ -39,9 +39,9 @@ func NewBotFleetClient(cc grpc.ClientConnInterface) BotFleetClient {
 	return &botFleetClient{cc}
 }
 
-func (c *botFleetClient) StartBenchmark(ctx context.Context, in *BenchmarkConfig, opts ...grpc.CallOption) (*Ack, error) {
+func (c *botFleetClient) StartBenchmark(ctx context.Context, in *BenchmarkConfig, opts ...grpc.CallOption) (*BotFleetAck, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(Ack)
+	out := new(BotFleetAck)
 	err := c.cc.Invoke(ctx, BotFleet_StartBenchmark_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -49,9 +49,9 @@ func (c *botFleetClient) StartBenchmark(ctx context.Context, in *BenchmarkConfig
 	return out, nil
 }
 
-func (c *botFleetClient) StopBenchmark(ctx context.Context, in *StopRequest, opts ...grpc.CallOption) (*Ack, error) {
+func (c *botFleetClient) StopBenchmark(ctx context.Context, in *StopRequest, opts ...grpc.CallOption) (*BotFleetAck, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(Ack)
+	out := new(BotFleetAck)
 	err := c.cc.Invoke(ctx, BotFleet_StopBenchmark_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -63,8 +63,8 @@ func (c *botFleetClient) StopBenchmark(ctx context.Context, in *StopRequest, opt
 // All implementations must embed UnimplementedBotFleetServer
 // for forward compatibility.
 type BotFleetServer interface {
-	StartBenchmark(context.Context, *BenchmarkConfig) (*Ack, error)
-	StopBenchmark(context.Context, *StopRequest) (*Ack, error)
+	StartBenchmark(context.Context, *BenchmarkConfig) (*BotFleetAck, error)
+	StopBenchmark(context.Context, *StopRequest) (*BotFleetAck, error)
 	mustEmbedUnimplementedBotFleetServer()
 }
 
@@ -75,10 +75,10 @@ type BotFleetServer interface {
 // pointer dereference when methods are called.
 type UnimplementedBotFleetServer struct{}
 
-func (UnimplementedBotFleetServer) StartBenchmark(context.Context, *BenchmarkConfig) (*Ack, error) {
+func (UnimplementedBotFleetServer) StartBenchmark(context.Context, *BenchmarkConfig) (*BotFleetAck, error) {
 	return nil, status.Error(codes.Unimplemented, "method StartBenchmark not implemented")
 }
-func (UnimplementedBotFleetServer) StopBenchmark(context.Context, *StopRequest) (*Ack, error) {
+func (UnimplementedBotFleetServer) StopBenchmark(context.Context, *StopRequest) (*BotFleetAck, error) {
 	return nil, status.Error(codes.Unimplemented, "method StopBenchmark not implemented")
 }
 func (UnimplementedBotFleetServer) mustEmbedUnimplementedBotFleetServer() {}

@@ -3,11 +3,18 @@ package main
 import (
 	"context"
 	"log/slog"
+	"net"
 	"os"
 	"os/signal"
 	"syscall"
 
+	"google.golang.org/grpc"
+
+	"github.com/bench/shared/proto/gen"
+	"github.com/bench/telemetry-ingester/aggregate"
 	"github.com/bench/telemetry-ingester/config"
+	"github.com/bench/telemetry-ingester/ingest"
+	"github.com/bench/telemetry-ingester/store"
 )
 
 func main() {
@@ -18,20 +25,53 @@ func main() {
 
 	cfg := config.Load()
 
-	slog.Info("telemetry-ingester starting",
-		"grpcAddr", cfg.GRPCListenAddr,
-		"windowSec", cfg.WindowSec,
-		"postgresDSN", "[redacted]", // never log actual DSN
-	)
+	// Connect to PostgreSQL.
+	pgStore, err := store.NewPostgresStore(cfg.PostgresDSN)
+	if err != nil {
+		slog.Error("failed to connect to postgres", "err", err)
+		os.Exit(1)
+	}
 
-	// Day 2: wire gRPC server here (ingest/server.go)
-	// Day 2: connect to PostgreSQL (store/postgres.go)
-	// Day 2: start aggregation pipeline (aggregate/window.go)
-	slog.Info("telemetry-ingester gRPC server: wiring pending Day 2")
+	// Create ring buffer and gRPC server.
+	buf := ingest.NewRingBuffer()
+	srv := ingest.NewServer(buf)
 
-	// Block indefinitely — service must not exit on Day 1.
-	// Simulates a long-running daemon so the Docker container stays alive.
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
-	<-ctx.Done()
+	// Create window manager.
+	wm := aggregate.NewWindowManager(cfg.WindowSec, buf, pgStore)
+
+	// Create a cancellable context for the window manager.
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Start the window manager in a goroutine.
+	go wm.Run(ctx)
+
+	// Set up gRPC server.
+	grpcServer := grpc.NewServer()
+	gen.RegisterTelemetryIngesterServer(grpcServer, srv)
+
+	lis, err := net.Listen("tcp", cfg.GRPCPort)
+	if err != nil {
+		slog.Error("failed to listen on gRPC port", "port", cfg.GRPCPort, "err", err)
+		os.Exit(1)
+	}
+
+	slog.Info("telemetry-ingester gRPC listening", "port", cfg.GRPCPort)
+
+	// Handle OS signals for graceful shutdown.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		<-sigCh
+		slog.Info("received shutdown signal")
+		cancel()
+		grpcServer.GracefulStop()
+		pgStore.Close()
+		slog.Info("telemetry-ingester shutdown complete")
+	}()
+
+	if err := grpcServer.Serve(lis); err != nil {
+		slog.Error("gRPC server failed", "err", err)
+		os.Exit(1)
+	}
 }

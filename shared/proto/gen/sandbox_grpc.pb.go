@@ -28,7 +28,7 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type SandboxEngineClient interface {
 	GetStatus(ctx context.Context, in *StatusRequest, opts ...grpc.CallOption) (*StatusResponse, error)
-	KillContainer(ctx context.Context, in *KillRequest, opts ...grpc.CallOption) (*Ack, error)
+	KillContainer(ctx context.Context, in *KillRequest, opts ...grpc.CallOption) (*SandboxAck, error)
 }
 
 type sandboxEngineClient struct {
@@ -49,9 +49,9 @@ func (c *sandboxEngineClient) GetStatus(ctx context.Context, in *StatusRequest, 
 	return out, nil
 }
 
-func (c *sandboxEngineClient) KillContainer(ctx context.Context, in *KillRequest, opts ...grpc.CallOption) (*Ack, error) {
+func (c *sandboxEngineClient) KillContainer(ctx context.Context, in *KillRequest, opts ...grpc.CallOption) (*SandboxAck, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(Ack)
+	out := new(SandboxAck)
 	err := c.cc.Invoke(ctx, SandboxEngine_KillContainer_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -64,7 +64,7 @@ func (c *sandboxEngineClient) KillContainer(ctx context.Context, in *KillRequest
 // for forward compatibility.
 type SandboxEngineServer interface {
 	GetStatus(context.Context, *StatusRequest) (*StatusResponse, error)
-	KillContainer(context.Context, *KillRequest) (*Ack, error)
+	KillContainer(context.Context, *KillRequest) (*SandboxAck, error)
 	mustEmbedUnimplementedSandboxEngineServer()
 }
 
@@ -78,7 +78,7 @@ type UnimplementedSandboxEngineServer struct{}
 func (UnimplementedSandboxEngineServer) GetStatus(context.Context, *StatusRequest) (*StatusResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetStatus not implemented")
 }
-func (UnimplementedSandboxEngineServer) KillContainer(context.Context, *KillRequest) (*Ack, error) {
+func (UnimplementedSandboxEngineServer) KillContainer(context.Context, *KillRequest) (*SandboxAck, error) {
 	return nil, status.Error(codes.Unimplemented, "method KillContainer not implemented")
 }
 func (UnimplementedSandboxEngineServer) mustEmbedUnimplementedSandboxEngineServer() {}

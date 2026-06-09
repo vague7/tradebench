@@ -1,43 +1,60 @@
 package store
 
 import (
-	"sync"
+	"context"
+	"database/sql"
+	"fmt"
 
-	benchtypes "github.com/bench/shared/types"
+	"github.com/bench/shared/types"
+	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
+// PostgresStore provides access to the PostgreSQL database for the telemetry-ingester.
 type PostgresStore struct {
-	mu      sync.Mutex
-	scores  []benchtypes.Score
-	snaps   []benchtypes.MetricSnapshot
+	db *sql.DB
 }
 
-func NewPostgresStore() *PostgresStore {
-	return &PostgresStore{}
-}
-
-func (s *PostgresStore) SaveSnapshot(snapshot benchtypes.MetricSnapshot) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	s.snaps = append(s.snaps, snapshot)
-}
-
-func (s *PostgresStore) SaveScore(score benchtypes.Score) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	s.scores = append(s.scores, score)
-}
-
-func (s *PostgresStore) LatestScore(submissionID string) (benchtypes.Score, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	for i := len(s.scores) - 1; i >= 0; i-- {
-		if s.scores[i].SubmissionID == submissionID {
-			return s.scores[i], true
-		}
+// NewPostgresStore opens a database connection using the pgx driver and verifies connectivity.
+func NewPostgresStore(dsn string) (*PostgresStore, error) {
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		return nil, fmt.Errorf("store: failed to open database: %w", err)
 	}
-	return benchtypes.Score{}, false
+
+	if err := db.Ping(); err != nil {
+		return nil, fmt.Errorf("store: failed to ping database: %w", err)
+	}
+
+	return &PostgresStore{db: db}, nil
+}
+
+// InsertMetricSnapshot inserts a single MetricSnapshot row into the metric_snapshots table.
+func (s *PostgresStore) InsertMetricSnapshot(ctx context.Context, snap types.MetricSnapshot) error {
+	const query = `INSERT INTO metric_snapshots
+		(submission_id, window_end, p50_latency_ms, p90_latency_ms, p99_latency_ms,
+		 tps, success_count, failure_count, timeout_count, correctness)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`
+
+	_, err := s.db.ExecContext(ctx, query,
+		snap.SubmissionID,
+		snap.WindowEnd,
+		snap.P50LatencyMs,
+		snap.P90LatencyMs,
+		snap.P99LatencyMs,
+		snap.TPS,
+		snap.SuccessCount,
+		snap.FailureCount,
+		snap.TimeoutCount,
+		snap.CorrectnessScore,
+	)
+	if err != nil {
+		return fmt.Errorf("store: InsertMetricSnapshot for submission %s: %w", snap.SubmissionID, err)
+	}
+
+	return nil
+}
+
+// Close closes the underlying database connection.
+func (s *PostgresStore) Close() error {
+	return s.db.Close()
 }
