@@ -2,118 +2,105 @@ package bot
 
 import (
 	"math/rand"
-	"sync"
-	"time"
 
 	"github.com/bench/shared/types"
 )
 
-// OrderRequest represents a generated order for the bot to fire at the contestant container.
-// Fields match PRD FR-3.1 order generation specification.
-type OrderRequest struct {
-	OrderType types.OrderType
-	Side      string  // "BUY" | "SELL" | "" (empty for MARKET and CANCEL)
-	Price     float64 // 0 for MARKET and CANCEL
-	Quantity  float64 // 0 for CANCEL
+// defaultMidPrice is used as the reference mid-price for order generation.
+// Day 4: static value. A realistic price feed is a Day 5/6 enhancement.
+const defaultMidPrice = 100.0
+
+// OrderSpec captures all fields needed to construct the HTTP request body for one order.
+type OrderSpec struct {
+	Type            types.OrderType // LIMIT, MARKET, or CANCEL
+	Side            string          // "BUY" or "SELL"; empty for cancel/market
+	Price           float64         // 0 for market/cancel
+	Quantity        float64         // 0 for cancel
+	OrderIDToCancel string          // UUID of order to cancel; empty otherwise
 }
 
-// goroutine-safe package-level RNG, protected by mutex.
-var (
-	rngMu  sync.Mutex
-	rngSrc *rand.Rand
-)
-
-func init() {
-	rngSrc = rand.New(rand.NewSource(time.Now().UnixNano()))
+// Generator produces orders following the PRD FR-3.1 distribution.
+// Each bot has its own Generator with its own *rand.Rand to avoid global lock
+// contention at 50k concurrent goroutines.
+type Generator struct {
+	rng      *rand.Rand
+	midPrice float64
 }
 
-// GenerateOrder produces a random order following the distribution in PRD FR-3.1:
-//   - [0.00, 0.35) → LIMIT BUY:  price = midPrice * (1 - rand in [0, 0.01)), qty in [1, 100]
-//   - [0.35, 0.70) → LIMIT SELL: price = midPrice * (1 + rand in [0, 0.01)), qty in [1, 100]
-//   - [0.70, 0.90) → MARKET:     price = 0, qty in [1, 100]
-//   - [0.90, 1.00) → CANCEL:     price = 0, qty = 0 (falls back to MARKET if no open orders)
-func GenerateOrder(midPrice float64, openOrderIDs []string) OrderRequest {
-	rngMu.Lock()
-	roll := rngSrc.Float64()
-	priceDelta := rngSrc.Float64() * 0.01
-	qty := 1.0 + rngSrc.Float64()*99.0
-	rngMu.Unlock()
+// NewGenerator creates a new Generator with a per-bot random source.
+// Each bot passes its own unique seed (e.g. derived from bot index) so
+// generators are statistically independent.
+func NewGenerator(seed int64) *Generator {
+	return &Generator{
+		rng:      rand.New(rand.NewSource(seed)),
+		midPrice: defaultMidPrice,
+	}
+}
+
+// Next generates the next order according to the FR-3.1 distribution:
+//   - [0.00, 0.35) → Limit Buy:  price within 1% below mid, qty 1–100
+//   - [0.35, 0.70) → Limit Sell: price within 1% above mid, qty 1–100
+//   - [0.70, 0.90) → Market:     no price, qty 1–100
+//   - [0.90, 1.00) → Cancel:     cancel a random open order
+//
+// If a Cancel is rolled but openOrderIDs is empty, fall back to Limit Buy.
+func (g *Generator) Next(openOrderIDs []string) OrderSpec {
+	roll := g.rng.Float64()
 
 	switch {
 	case roll < 0.35:
-		return OrderRequest{
-			OrderType: types.OrderTypeLimit,
-			Side:      "BUY",
-			Price:     midPrice * (1 - priceDelta),
-			Quantity:  qty,
-		}
+		return g.limitBuy()
 	case roll < 0.70:
-		return OrderRequest{
-			OrderType: types.OrderTypeLimit,
-			Side:      "SELL",
-			Price:     midPrice * (1 + priceDelta),
-			Quantity:  qty,
-		}
+		return g.limitSell()
 	case roll < 0.90:
-		return OrderRequest{
-			OrderType: types.OrderTypeMarket,
-			Side:      "",
-			Price:     0,
-			Quantity:  qty,
-		}
+		return g.market()
 	default:
-		// CANCEL: fall back to MARKET if no open orders exist
+		// CANCEL: fall back to Limit Buy if no open orders exist
 		if len(openOrderIDs) == 0 {
-			return OrderRequest{
-				OrderType: types.OrderTypeMarket,
-				Side:      "",
-				Price:     0,
-				Quantity:  qty,
-			}
+			return g.limitBuy()
 		}
-		return OrderRequest{
-			OrderType: types.OrderTypeCancel,
-			Side:      "",
-			Price:     0,
-			Quantity:  0,
+		idx := g.rng.Intn(len(openOrderIDs))
+		return OrderSpec{
+			Type:            types.OrderTypeCancel,
+			Side:            "",
+			Price:           0,
+			Quantity:        0,
+			OrderIDToCancel: openOrderIDs[idx],
 		}
 	}
 }
 
-// --- Backward-compatible types for fleet/coordinator.go (Day 2+ will refactor) ---
-
-// Order is a legacy stub type used by the existing fleet coordinator.
-// Day 2: replace with OrderRequest once coordinator is rewritten.
-type Order struct {
-	Type         types.OrderType
-	ExpectedFill types.Fill
-}
-
-// Generator is a legacy stub type used by the existing fleet coordinator.
-// Day 2: replace with GenerateOrder function.
-type Generator struct{}
-
-// NewGenerator creates a new legacy Generator.
-func NewGenerator() *Generator {
-	return &Generator{}
-}
-
-// Next generates an order using the legacy interface.
-// Day 2: migrate callers to GenerateOrder.
-func (g *Generator) Next(rng *rand.Rand) Order {
-	if rng == nil {
-		rng = rand.New(rand.NewSource(1))
+// limitBuy generates a Limit Buy order: price within 1% below mid-price, qty 1–100.
+func (g *Generator) limitBuy() OrderSpec {
+	priceDelta := g.rng.Float64() * 0.01
+	qty := 1.0 + g.rng.Float64()*99.0
+	return OrderSpec{
+		Type:     types.OrderTypeLimit,
+		Side:     "BUY",
+		Price:    g.midPrice * (1 - priceDelta),
+		Quantity: qty,
 	}
+}
 
-	roll := rng.Intn(100)
-	switch {
-	case roll < 35:
-		return Order{Type: types.OrderTypeLimit, ExpectedFill: types.Fill{Price: 99.5, Quantity: 1, Side: "BUY"}}
-	case roll < 70:
-		return Order{Type: types.OrderTypeLimit, ExpectedFill: types.Fill{Price: 100.5, Quantity: 1, Side: "SELL"}}
-	case roll < 90:
-		return Order{Type: types.OrderTypeMarket, ExpectedFill: types.Fill{Price: 0, Quantity: 1, Side: "BUY"}}
-	default:
-		return Order{Type: types.OrderTypeCancel, ExpectedFill: types.Fill{Price: 0, Quantity: 0, Side: "BUY"}}
+// limitSell generates a Limit Sell order: price within 1% above mid-price, qty 1–100.
+func (g *Generator) limitSell() OrderSpec {
+	priceDelta := g.rng.Float64() * 0.01
+	qty := 1.0 + g.rng.Float64()*99.0
+	return OrderSpec{
+		Type:     types.OrderTypeLimit,
+		Side:     "SELL",
+		Price:    g.midPrice * (1 + priceDelta),
+		Quantity: qty,
+	}
+}
+
+// market generates a Market order: no price, qty 1–100.
+func (g *Generator) market() OrderSpec {
+	qty := 1.0 + g.rng.Float64()*99.0
+	return OrderSpec{
+		Type:     types.OrderTypeMarket,
+		Side:     "",
+		Price:    0,
+		Quantity: qty,
 	}
 }

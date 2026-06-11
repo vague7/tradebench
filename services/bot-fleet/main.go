@@ -2,18 +2,125 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
+	"net"
 	"os"
+	"os/signal"
 	"sync"
-	"sync/atomic"
-	"time"
+	"syscall"
 
-	"github.com/bench/bot-fleet/bot"
 	"github.com/bench/bot-fleet/config"
+	"github.com/bench/bot-fleet/emit"
+	"github.com/bench/bot-fleet/fleet"
+	gen "github.com/bench/shared/proto/gen"
+	"github.com/bench/shared/types"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
-// day1BotCap limits goroutine count for Day 1 safety.
-const day1BotCap = 100
+// BotFleetServer implements the gen.BotFleetServer gRPC interface.
+type BotFleetServer struct {
+	gen.UnimplementedBotFleetServer
+
+	cfg     *config.Config
+	profile fleet.LoadProfile
+
+	// activeBenchmarks tracks running benchmark cancel functions per submissionID.
+	// Accessed from gRPC handler goroutines, so sync.Map is required.
+	activeBenchmarks sync.Map // map[string]context.CancelFunc
+
+	// streamerDone is closed when the streamer goroutine finishes.
+	streamerDone chan struct{}
+}
+
+// StartBenchmark is the RPC called by Engineer 1's api-gateway when a submission
+// reaches RUNNING status. It launches the benchmark asynchronously and returns immediately.
+func (s *BotFleetServer) StartBenchmark(ctx context.Context, req *gen.BenchmarkConfig) (*gen.BotFleetAck, error) {
+	if req.GetSubmissionId() == "" || req.GetTargetHost() == "" {
+		slog.Error("StartBenchmark called with missing fields",
+			"submissionId", req.GetSubmissionId(),
+			"targetHost", req.GetTargetHost(),
+		)
+		return nil, status.Error(codes.InvalidArgument, "submission_id and target_host are required")
+	}
+
+	submissionID := req.GetSubmissionId()
+	targetURL := "http://" + req.GetTargetHost()
+
+	// Create a new emit channel for this benchmark
+	emitCh := make(chan types.BotEvent, emit.EmitChannelCap)
+
+	// Create a new coordinator for this benchmark
+	coordinator := fleet.NewCoordinator(s.cfg, s.profile, emitCh)
+
+	// Create a cancellable context for this benchmark, derived from background
+	// so it doesn't die when the RPC context ends
+	benchCtx, benchCancel := context.WithCancel(context.Background())
+
+	// Store the cancel function so StopBenchmark can cancel it
+	s.activeBenchmarks.Store(submissionID, benchCancel)
+
+	// Create and start a streamer for this benchmark
+	streamer, err := emit.NewStreamer(s.cfg.TelemetryGRPCAddr, emitCh)
+	if err != nil {
+		benchCancel()
+		slog.Error("failed to connect to telemetry-ingester",
+			"addr", s.cfg.TelemetryGRPCAddr,
+			"err", err,
+		)
+		return nil, status.Error(codes.Internal, fmt.Sprintf("failed to connect to telemetry-ingester: %v", err))
+	}
+
+	// Launch streamer goroutine for this benchmark
+	streamerDone := make(chan struct{})
+	go func() {
+		defer close(streamerDone)
+		if err := streamer.Run(benchCtx); err != nil {
+			slog.Error("streamer error", "submissionId", submissionID, "err", err)
+		}
+	}()
+
+	// Launch the benchmark in a background goroutine
+	go func() {
+		defer func() {
+			s.activeBenchmarks.Delete(submissionID)
+			// Wait for streamer to finish after coordinator closes emitCh
+			<-streamerDone
+			if closeErr := streamer.Close(); closeErr != nil {
+				slog.Error("streamer close error", "submissionId", submissionID, "err", closeErr)
+			}
+		}()
+
+		if runErr := coordinator.Run(benchCtx, submissionID, targetURL); runErr != nil {
+			slog.Error("benchmark run error", "submissionId", submissionID, "err", runErr)
+		}
+	}()
+
+	slog.Info("benchmark started",
+		"submissionId", req.GetSubmissionId(),
+		"targetHost", req.GetTargetHost(),
+		"botCount", req.GetBotCount(),
+		"durationSec", req.GetDurationSec(),
+	)
+
+	return &gen.BotFleetAck{Ok: true}, nil
+}
+
+// StopBenchmark is the RPC called by Engineer 1's admin stop endpoint.
+// It cancels the running benchmark context for the given SubmissionID.
+func (s *BotFleetServer) StopBenchmark(_ context.Context, req *gen.StopRequest) (*gen.BotFleetAck, error) {
+	submissionID := req.GetSubmissionId()
+
+	slog.Info("benchmark stop requested", "submissionId", submissionID)
+
+	if cancel, ok := s.activeBenchmarks.Load(submissionID); ok {
+		cancel.(context.CancelFunc)()
+	}
+
+	return &gen.BotFleetAck{Ok: true}, nil
+}
 
 func main() {
 	// Structured JSON logger — PRD Section 9.1
@@ -23,95 +130,63 @@ func main() {
 
 	cfg := config.Load()
 
-	// Day 1 local test overrides — not permanent config fields.
-	// Exception to config-only rule: temporary smoke-test harness.
-	targetURL := os.Getenv("BOT_TARGET_URL")
-	if targetURL == "" {
-		targetURL = "http://localhost:8080"
-	}
-
-	submissionID := os.Getenv("BOT_TEST_SUBMISSION_ID")
-	if submissionID == "" {
-		submissionID = "test-submission-day1"
-	}
-
 	slog.Info("bot-fleet starting",
-		"botCount", cfg.BotDefaultCount,
-		"targetURL", targetURL,
-		"timeoutMs", cfg.BotTimeoutMs,
+		"fleetGRPCPort", cfg.FleetGRPCPort,
+		"telemetryGRPCAddr", cfg.TelemetryGRPCAddr,
+		"defaultBotCount", cfg.DefaultBotCount,
+		"timeoutMs", cfg.TimeoutMs,
+		"targetTPS", cfg.TargetTPS,
 	)
 
-	botCount := min(cfg.BotDefaultCount, day1BotCap)
+	// Construct default load profile
+	profile := fleet.DefaultProfile()
 
-	// Day 1: 30-second timeout for the entire run
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	slog.Info("load profile configured",
+		"phases", len(profile),
+		"totalDuration", profile.TotalDuration().String(),
+	)
 
-	var wg sync.WaitGroup
-	var totalEvents, successCount, failureCount, timeoutCount int64
-	start := time.Now()
+	// Create the gRPC server
+	grpcServer := grpc.NewServer()
 
-	for i := 0; i < botCount; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-
-			// Per-bot state: each bot maintains its own open order list
-			var openOrderIDs []string
-			var mu sync.Mutex
-
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				default:
-				}
-
-				event, err := bot.RunBot(ctx, submissionID, targetURL, cfg.BotTimeoutMs, &openOrderIDs, &mu)
-				if err != nil {
-					// If context is done, exit cleanly
-					if ctx.Err() != nil {
-						return
-					}
-					slog.Debug("bot run error",
-						"submissionId", submissionID,
-						"err", err,
-					)
-					continue
-				}
-
-				atomic.AddInt64(&totalEvents, 1)
-				switch {
-				case event.HTTPStatus == 0:
-					atomic.AddInt64(&timeoutCount, 1)
-				case event.HTTPStatus >= 200 && event.HTTPStatus < 300:
-					atomic.AddInt64(&successCount, 1)
-				default:
-					atomic.AddInt64(&failureCount, 1)
-				}
-
-				slog.Debug("bot event",
-					"submissionId", event.SubmissionID,
-					"botId", event.BotID,
-					"orderId", event.OrderID,
-					"orderType", event.OrderType,
-					"httpStatus", event.HTTPStatus,
-					"durationMs", event.AckedAt.Sub(event.SentAt).Milliseconds(),
-				)
-			}
-		}()
+	botFleetServer := &BotFleetServer{
+		cfg:     cfg,
+		profile: profile,
 	}
 
-	wg.Wait()
-	elapsed := time.Since(start)
+	gen.RegisterBotFleetServer(grpcServer, botFleetServer)
 
-	slog.Info("bot-fleet day1 run complete",
-		"totalEvents", atomic.LoadInt64(&totalEvents),
-		"successCount", atomic.LoadInt64(&successCount),
-		"failureCount", atomic.LoadInt64(&failureCount),
-		"timeoutCount", atomic.LoadInt64(&timeoutCount),
-		"durationMs", elapsed.Milliseconds(),
-	)
+	// Start listening on the configured port
+	lis, err := net.Listen("tcp", cfg.FleetGRPCPort)
+	if err != nil {
+		slog.Error("failed to listen", "port", cfg.FleetGRPCPort, "err", err)
+		os.Exit(1)
+	}
 
-	os.Exit(0)
+	// Handle SIGINT/SIGTERM for graceful shutdown
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		sig := <-sigCh
+		slog.Info("shutdown signal received", "signal", sig.String())
+
+		// Cancel all active benchmarks
+		botFleetServer.activeBenchmarks.Range(func(key, value any) bool {
+			value.(context.CancelFunc)()
+			return true
+		})
+
+		// Gracefully stop the gRPC server
+		grpcServer.GracefulStop()
+	}()
+
+	slog.Info("bot-fleet gRPC server listening", "port", cfg.FleetGRPCPort)
+
+	if err := grpcServer.Serve(lis); err != nil {
+		slog.Error("gRPC server error", "err", err)
+		os.Exit(1)
+	}
+
+	slog.Info("bot-fleet shutdown complete")
 }

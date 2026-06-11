@@ -6,9 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"math/rand"
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/bench/shared/types"
@@ -27,58 +25,88 @@ type orderPayload struct {
 // orderResponse is the JSON body received from the contestant container.
 // Matches PRD Section 2.3.3 contestant container response body.
 type orderResponse struct {
-	OrderID string     `json:"orderId"`
-	Status  string     `json:"status"`
+	OrderID string      `json:"orderId"`
+	Status  string      `json:"status"`
 	Fill    *types.Fill `json:"fill,omitempty"`
 }
 
-// RunBot executes a single bot invocation: generates an order, fires it as a real HTTP
-// request to the contestant container, records timing, and returns a BotEvent.
-//
-// This function is designed to be called in a loop from a goroutine. The coordinator
-// (Day 2+) will spawn N of these concurrently.
-func RunBot(ctx context.Context, submissionID, targetBaseURL string, timeoutMs int, openOrderIDs *[]string, mu *sync.Mutex) (types.BotEvent, error) {
-	botID := uuid.NewString()
-	orderID := uuid.NewString()
+// Bot represents a single synthetic trading bot that fires orders at a contestant container.
+type Bot struct {
+	BotID        string
+	SubmissionID string
+	targetURL    string
+	timeoutMs    int
+	client       *http.Client
+	gen          *Generator
+	emitCh       chan<- types.BotEvent
+	openOrderIDs []string
+}
 
-	// Snapshot openOrderIDs for reading
-	mu.Lock()
-	snapshot := make([]string, len(*openOrderIDs))
-	copy(snapshot, *openOrderIDs)
-	mu.Unlock()
+// NewBot creates a new Bot instance.
+// emitCh is a buffered channel into which the bot pushes completed BotEvent records.
+// The streamer drains this channel.
+func NewBot(id, submissionID, targetURL string, timeoutMs int, emitCh chan<- types.BotEvent) *Bot {
+	return &Bot{
+		BotID:        id,
+		SubmissionID: submissionID,
+		targetURL:    targetURL,
+		timeoutMs:    timeoutMs,
+		// Client has no global timeout — we use context.WithTimeout per request
+		// so that context cancellation also aborts in-flight requests immediately.
+		client: &http.Client{},
+		gen:    NewGenerator(time.Now().UnixNano() ^ int64(len(id))),
+		emitCh: emitCh,
+	}
+}
 
-	// Day 1: hardcoded midPrice of 100.0 (real mid-price will come from orderbook endpoint in later days)
-	orderReq := GenerateOrder(100.0, snapshot)
+// Run is the bot's main loop. It fires orders as fast as the contestant responds.
+// The concurrency (number of simultaneous bots) is the throttle mechanism, not per-bot sleep.
+// It exits cleanly when ctx is cancelled.
+func (b *Bot) Run(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
 
-	// Build HTTP request based on order type
-	reqCtx, reqCancel := context.WithTimeout(ctx, time.Duration(timeoutMs)*time.Millisecond)
+		b.executeOnce(ctx)
+	}
+}
+
+// executeOnce performs a single order-fire-record cycle.
+func (b *Bot) executeOnce(ctx context.Context) {
+	order := b.gen.Next(b.openOrderIDs)
+
+	// Build and fire HTTP request with per-request timeout
+	reqCtx, reqCancel := context.WithTimeout(ctx, time.Duration(b.timeoutMs)*time.Millisecond)
 	defer reqCancel()
 
 	var req *http.Request
 	var reqErr error
 
-	switch orderReq.OrderType {
+	switch order.Type {
 	case types.OrderTypeCancel:
-		// Pick a random open order ID for cancellation
-		rngMu.Lock()
-		idx := rngSrc.Intn(len(snapshot))
-		rngMu.Unlock()
-		cancelID := snapshot[idx]
-		url := fmt.Sprintf("%s/order/%s", targetBaseURL, cancelID)
+		url := fmt.Sprintf("%s/order/%s", b.targetURL, order.OrderIDToCancel)
 		req, reqErr = http.NewRequestWithContext(reqCtx, http.MethodDelete, url, nil)
 	default:
 		// LIMIT or MARKET: POST /order with JSON body
 		payload := orderPayload{
-			Type:     string(orderReq.OrderType),
-			Side:     orderReq.Side,
-			Price:    orderReq.Price,
-			Quantity: orderReq.Quantity,
+			Type:     string(order.Type),
+			Side:     order.Side,
+			Price:    order.Price,
+			Quantity: order.Quantity,
 		}
 		body, marshalErr := json.Marshal(payload)
 		if marshalErr != nil {
-			return types.BotEvent{}, fmt.Errorf("bot: marshal order payload for %s: %w", submissionID, marshalErr)
+			slog.Error("bot: marshal order payload",
+				"submissionId", b.SubmissionID,
+				"botId", b.BotID,
+				"err", marshalErr,
+			)
+			return
 		}
-		url := fmt.Sprintf("%s/order", targetBaseURL)
+		url := fmt.Sprintf("%s/order", b.targetURL)
 		req, reqErr = http.NewRequestWithContext(reqCtx, http.MethodPost, url, bytes.NewReader(body))
 		if req != nil {
 			req.Header.Set("Content-Type", "application/json")
@@ -86,28 +114,25 @@ func RunBot(ctx context.Context, submissionID, targetBaseURL string, timeoutMs i
 	}
 
 	if reqErr != nil {
-		return types.BotEvent{}, fmt.Errorf("bot: create request for %s: %w", submissionID, reqErr)
+		slog.Error("bot: create request",
+			"submissionId", b.SubmissionID,
+			"botId", b.BotID,
+			"err", reqErr,
+		)
+		return
 	}
 
-	// Fire the request with a dedicated client (not DefaultClient — it has no timeout)
-	client := &http.Client{Timeout: time.Duration(timeoutMs) * time.Millisecond}
-
 	sentAt := time.Now()
-	resp, httpErr := client.Do(req)
+	resp, httpErr := b.client.Do(req)
 	ackedAt := time.Now()
 
 	var httpStatus int
 	var actualFill types.Fill
+	var respOrderID string
 
 	if httpErr != nil {
 		// Timeout or network error: httpStatus = 0
 		httpStatus = 0
-		slog.Debug("bot: request error",
-			"submissionId", submissionID,
-			"botId", botID,
-			"orderType", orderReq.OrderType,
-			"err", httpErr,
-		)
 	} else {
 		defer resp.Body.Close()
 		httpStatus = resp.StatusCode
@@ -115,81 +140,62 @@ func RunBot(ctx context.Context, submissionID, targetBaseURL string, timeoutMs i
 		if httpStatus == http.StatusOK {
 			var respBody orderResponse
 			if decErr := json.NewDecoder(resp.Body).Decode(&respBody); decErr == nil {
+				respOrderID = respBody.OrderID
+
 				// Parse ActualFill from response
 				if respBody.Fill != nil {
 					actualFill = *respBody.Fill
 				}
-				// If order accepted and non-CANCEL, track the open order ID
-				if orderReq.OrderType != types.OrderTypeCancel && respBody.OrderID != "" {
-					mu.Lock()
-					*openOrderIDs = append(*openOrderIDs, respBody.OrderID)
-					mu.Unlock()
+
+				// Track open order IDs
+				if order.Type != types.OrderTypeCancel && respBody.OrderID != "" {
+					b.openOrderIDs = append(b.openOrderIDs, respBody.OrderID)
+				}
+
+				// For successful cancels, remove the cancelled order from open orders
+				if order.Type == types.OrderTypeCancel {
+					b.removeOpenOrder(order.OrderIDToCancel)
 				}
 			}
 		}
 	}
 
-	return types.BotEvent{
-		SubmissionID: submissionID,
-		BotID:        botID,
+	// Use response orderId if available, otherwise generate a UUID
+	orderID := respOrderID
+	if orderID == "" {
+		orderID = uuid.NewString()
+	}
+
+	event := types.BotEvent{
+		SubmissionID: b.SubmissionID,
+		BotID:        b.BotID,
 		OrderID:      orderID,
-		OrderType:    orderReq.OrderType,
+		OrderType:    order.Type,
 		SentAt:       sentAt,
 		AckedAt:      ackedAt,
 		HTTPStatus:   httpStatus,
-		ExpectedFill: types.Fill{}, // Day 1: reference engine not yet wired
+		ExpectedFill: types.Fill{}, // Day 4: zero-value; correctness validator fills on Day 5
 		ActualFill:   actualFill,
-	}, nil
-}
-
-// --- Backward-compatible types for fleet/coordinator.go (Day 2+ will refactor) ---
-
-// Streamer is a legacy interface used by the existing fleet coordinator.
-// Day 2: wire gRPC stream here via emit/streamer.go
-type Streamer interface {
-	Send(context.Context, types.BotEvent) error
-}
-
-// Runner is a legacy stub type used by the existing fleet coordinator.
-// Day 2: replace with RunBot-based coordinator.
-type Runner struct {
-	Generator *Generator
-	Streamer  Streamer
-}
-
-// NewRunner creates a new legacy Runner.
-func NewRunner(generator *Generator, streamer Streamer) *Runner {
-	return &Runner{Generator: generator, Streamer: streamer}
-}
-
-// Run executes bot iterations using the legacy interface.
-// Day 2: migrate to RunBot-based goroutine pool.
-func (r *Runner) Run(ctx context.Context, submissionID, botID string, iterations int) error {
-	if iterations <= 0 {
-		iterations = 1
 	}
-	for i := 0; i < iterations; i++ {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
 
-		order := r.Generator.Next(rand.New(rand.NewSource(time.Now().UnixNano() + int64(i))))
-		event := types.BotEvent{
-			SubmissionID: submissionID,
-			BotID:        botID,
-			OrderID:      fmt.Sprintf("%s-%d", botID, i),
-			OrderType:    order.Type,
-			SentAt:       time.Now().UTC(),
-			AckedAt:      time.Now().UTC(),
-			HTTPStatus:   200,
-			ExpectedFill: order.ExpectedFill,
-			ActualFill:   order.ExpectedFill,
-		}
-		if err := r.Streamer.Send(ctx, event); err != nil {
-			return err
+	// Non-blocking push onto emitCh. If channel is full, drop event.
+	select {
+	case b.emitCh <- event:
+	default:
+		slog.Warn("emit channel full, event dropped",
+			"botId", b.BotID,
+			"submissionId", b.SubmissionID,
+		)
+	}
+}
+
+// removeOpenOrder removes an order ID from the bot's open order list.
+func (b *Bot) removeOpenOrder(orderID string) {
+	for i, id := range b.openOrderIDs {
+		if id == orderID {
+			b.openOrderIDs[i] = b.openOrderIDs[len(b.openOrderIDs)-1]
+			b.openOrderIDs = b.openOrderIDs[:len(b.openOrderIDs)-1]
+			return
 		}
 	}
-	return nil
 }
