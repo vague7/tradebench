@@ -1,6 +1,6 @@
 module github.com/bench/telemetry-ingester
 
-go 1.22
+go 1.25.0
 
 require github.com/bench/shared v0.0.0
 

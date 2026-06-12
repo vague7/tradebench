@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
 )
@@ -75,7 +76,7 @@ func (h *HealthChecker) KillAndRemove(containerID string) error {
 	if err := h.docker.ContainerStop(ctx, containerID, container.StopOptions{Timeout: &timeout}); err != nil {
 		return fmt.Errorf("healthchecker: stop container: %w", err)
 	}
-	if err := h.docker.ContainerRemove(ctx, containerID, container.RemoveOptions{Force: true}); err != nil {
+	if err := h.docker.ContainerRemove(ctx, containerID, types.ContainerRemoveOptions{Force: true}); err != nil {
 		return fmt.Errorf("healthchecker: remove container: %w", err)
 	}
 	return nil

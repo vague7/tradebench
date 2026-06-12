@@ -59,7 +59,7 @@ export async function uploadSubmission(input: {
 }): Promise<SubmissionUploadResponse> {
   const form = new FormData();
   form.append('teamName', input.teamName);
-  form.append('zipFile', input.zipFile);
+  form.append('file', input.zipFile);
 
   const response = await fetch(buildUrl('/api/submissions'), {
     method: 'POST',

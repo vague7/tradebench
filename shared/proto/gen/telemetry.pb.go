@@ -190,27 +190,27 @@ func (x *BotEventProto) GetActualFill() *Fill {
 	return nil
 }
 
-type Ack struct {
+type TelemetryAck struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Ok            bool                   `protobuf:"varint,1,opt,name=ok,proto3" json:"ok,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *Ack) Reset() {
-	*x = Ack{}
+func (x *TelemetryAck) Reset() {
+	*x = TelemetryAck{}
 	mi := &file_telemetry_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *Ack) String() string {
+func (x *TelemetryAck) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*Ack) ProtoMessage() {}
+func (*TelemetryAck) ProtoMessage() {}
 
-func (x *Ack) ProtoReflect() protoreflect.Message {
+func (x *TelemetryAck) ProtoReflect() protoreflect.Message {
 	mi := &file_telemetry_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -222,12 +222,12 @@ func (x *Ack) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use Ack.ProtoReflect.Descriptor instead.
-func (*Ack) Descriptor() ([]byte, []int) {
+// Deprecated: Use TelemetryAck.ProtoReflect.Descriptor instead.
+func (*TelemetryAck) Descriptor() ([]byte, []int) {
 	return file_telemetry_proto_rawDescGZIP(), []int{2}
 }
 
-func (x *Ack) GetOk() bool {
+func (x *TelemetryAck) GetOk() bool {
 	if x != nil {
 		return x.Ok
 	}
@@ -277,7 +277,7 @@ var file_telemetry_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
 var file_telemetry_proto_goTypes = []any{
 	(*Fill)(nil),                  // 0: telemetry.Fill
 	(*BotEventProto)(nil),         // 1: telemetry.BotEventProto
-	(*Ack)(nil),                   // 2: telemetry.Ack
+	(*TelemetryAck)(nil),          // 2: telemetry.Ack
 	(*timestamppb.Timestamp)(nil), // 3: google.protobuf.Timestamp
 }
 var file_telemetry_proto_depIdxs = []int32{

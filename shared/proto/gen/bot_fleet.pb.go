@@ -133,27 +133,27 @@ func (x *StopRequest) GetSubmissionId() string {
 	return ""
 }
 
-type Ack struct {
+type BotFleetAck struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Ok            bool                   `protobuf:"varint,1,opt,name=ok,proto3" json:"ok,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *Ack) Reset() {
-	*x = Ack{}
+func (x *BotFleetAck) Reset() {
+	*x = BotFleetAck{}
 	mi := &file_bot_fleet_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *Ack) String() string {
+func (x *BotFleetAck) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*Ack) ProtoMessage() {}
+func (*BotFleetAck) ProtoMessage() {}
 
-func (x *Ack) ProtoReflect() protoreflect.Message {
+func (x *BotFleetAck) ProtoReflect() protoreflect.Message {
 	mi := &file_bot_fleet_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -165,12 +165,12 @@ func (x *Ack) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use Ack.ProtoReflect.Descriptor instead.
-func (*Ack) Descriptor() ([]byte, []int) {
+// Deprecated: Use BotFleetAck.ProtoReflect.Descriptor instead.
+func (*BotFleetAck) Descriptor() ([]byte, []int) {
 	return file_bot_fleet_proto_rawDescGZIP(), []int{2}
 }
 
-func (x *Ack) GetOk() bool {
+func (x *BotFleetAck) GetOk() bool {
 	if x != nil {
 		return x.Ok
 	}
@@ -212,7 +212,7 @@ var file_bot_fleet_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
 var file_bot_fleet_proto_goTypes = []any{
 	(*BenchmarkConfig)(nil), // 0: botfleet.BenchmarkConfig
 	(*StopRequest)(nil),     // 1: botfleet.StopRequest
-	(*Ack)(nil),             // 2: botfleet.Ack
+	(*BotFleetAck)(nil),             // 2: botfleet.Ack
 }
 var file_bot_fleet_proto_depIdxs = []int32{
 	0, // 0: botfleet.BotFleet.StartBenchmark:input_type -> botfleet.BenchmarkConfig

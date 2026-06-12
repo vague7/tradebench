@@ -26,7 +26,7 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type TelemetryIngesterClient interface {
-	StreamEvents(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[BotEventProto, Ack], error)
+	StreamEvents(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[BotEventProto, TelemetryAck], error)
 }
 
 type telemetryIngesterClient struct {
@@ -37,24 +37,24 @@ func NewTelemetryIngesterClient(cc grpc.ClientConnInterface) TelemetryIngesterCl
 	return &telemetryIngesterClient{cc}
 }
 
-func (c *telemetryIngesterClient) StreamEvents(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[BotEventProto, Ack], error) {
+func (c *telemetryIngesterClient) StreamEvents(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[BotEventProto, TelemetryAck], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	stream, err := c.cc.NewStream(ctx, &TelemetryIngester_ServiceDesc.Streams[0], TelemetryIngester_StreamEvents_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
-	x := &grpc.GenericClientStream[BotEventProto, Ack]{ClientStream: stream}
+	x := &grpc.GenericClientStream[BotEventProto, TelemetryAck]{ClientStream: stream}
 	return x, nil
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type TelemetryIngester_StreamEventsClient = grpc.ClientStreamingClient[BotEventProto, Ack]
+type TelemetryIngester_StreamEventsClient = grpc.ClientStreamingClient[BotEventProto, TelemetryAck]
 
 // TelemetryIngesterServer is the server API for TelemetryIngester service.
 // All implementations must embed UnimplementedTelemetryIngesterServer
 // for forward compatibility.
 type TelemetryIngesterServer interface {
-	StreamEvents(grpc.ClientStreamingServer[BotEventProto, Ack]) error
+	StreamEvents(grpc.ClientStreamingServer[BotEventProto, TelemetryAck]) error
 	mustEmbedUnimplementedTelemetryIngesterServer()
 }
 
@@ -65,7 +65,7 @@ type TelemetryIngesterServer interface {
 // pointer dereference when methods are called.
 type UnimplementedTelemetryIngesterServer struct{}
 
-func (UnimplementedTelemetryIngesterServer) StreamEvents(grpc.ClientStreamingServer[BotEventProto, Ack]) error {
+func (UnimplementedTelemetryIngesterServer) StreamEvents(grpc.ClientStreamingServer[BotEventProto, TelemetryAck]) error {
 	return status.Error(codes.Unimplemented, "method StreamEvents not implemented")
 }
 func (UnimplementedTelemetryIngesterServer) mustEmbedUnimplementedTelemetryIngesterServer() {}
@@ -90,11 +90,11 @@ func RegisterTelemetryIngesterServer(s grpc.ServiceRegistrar, srv TelemetryInges
 }
 
 func _TelemetryIngester_StreamEvents_Handler(srv interface{}, stream grpc.ServerStream) error {
-	return srv.(TelemetryIngesterServer).StreamEvents(&grpc.GenericServerStream[BotEventProto, Ack]{ServerStream: stream})
+	return srv.(TelemetryIngesterServer).StreamEvents(&grpc.GenericServerStream[BotEventProto, TelemetryAck]{ServerStream: stream})
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type TelemetryIngester_StreamEventsServer = grpc.ClientStreamingServer[BotEventProto, Ack]
+type TelemetryIngester_StreamEventsServer = grpc.ClientStreamingServer[BotEventProto, TelemetryAck]
 
 // TelemetryIngester_ServiceDesc is the grpc.ServiceDesc for TelemetryIngester service.
 // It's only intended for direct use with grpc.RegisterService,

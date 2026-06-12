@@ -177,27 +177,27 @@ func (x *StatusResponse) GetErrorMessage() string {
 	return ""
 }
 
-type Ack struct {
+type SandboxAck struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Ok            bool                   `protobuf:"varint,1,opt,name=ok,proto3" json:"ok,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *Ack) Reset() {
-	*x = Ack{}
+func (x *SandboxAck) Reset() {
+	*x = SandboxAck{}
 	mi := &file_sandbox_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *Ack) String() string {
+func (x *SandboxAck) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*Ack) ProtoMessage() {}
+func (*SandboxAck) ProtoMessage() {}
 
-func (x *Ack) ProtoReflect() protoreflect.Message {
+func (x *SandboxAck) ProtoReflect() protoreflect.Message {
 	mi := &file_sandbox_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -209,12 +209,12 @@ func (x *Ack) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use Ack.ProtoReflect.Descriptor instead.
-func (*Ack) Descriptor() ([]byte, []int) {
+// Deprecated: Use SandboxAck.ProtoReflect.Descriptor instead.
+func (*SandboxAck) Descriptor() ([]byte, []int) {
 	return file_sandbox_proto_rawDescGZIP(), []int{3}
 }
 
-func (x *Ack) GetOk() bool {
+func (x *SandboxAck) GetOk() bool {
 	if x != nil {
 		return x.Ok
 	}
@@ -258,7 +258,7 @@ var file_sandbox_proto_goTypes = []any{
 	(*StatusRequest)(nil),  // 0: sandbox.StatusRequest
 	(*KillRequest)(nil),    // 1: sandbox.KillRequest
 	(*StatusResponse)(nil), // 2: sandbox.StatusResponse
-	(*Ack)(nil),            // 3: sandbox.Ack
+	(*SandboxAck)(nil),            // 3: sandbox.Ack
 }
 var file_sandbox_proto_depIdxs = []int32{
 	0, // 0: sandbox.SandboxEngine.GetStatus:input_type -> sandbox.StatusRequest

@@ -1,4 +1,4 @@
-FROM golang:1.22-alpine AS builder
+FROM golang:1.25-alpine AS builder
 WORKDIR /app
 COPY scripts/test_submission/ ./scripts/test_submission/
 WORKDIR /app/scripts/test_submission

@@ -7,7 +7,7 @@ option go_package = "github.com/bench/shared/proto/gen";
 import "google/protobuf/timestamp.proto";
 
 service TelemetryIngester {
-  rpc StreamEvents(stream BotEventProto) returns (Ack);
+  rpc StreamEvents(stream BotEventProto) returns (TelemetryAck);
 }
 
 message Fill {
@@ -28,6 +28,6 @@ message BotEventProto {
   Fill actual_fill = 9;
 }
 
-message Ack {
+message TelemetryAck {
   bool ok = 1;
 }

@@ -5,8 +5,8 @@ package botfleet;
 option go_package = "github.com/bench/shared/proto/gen";
 
 service BotFleet {
-  rpc StartBenchmark(BenchmarkConfig) returns (Ack);
-  rpc StopBenchmark(StopRequest) returns (Ack);
+  rpc StartBenchmark(BenchmarkConfig) returns (BotFleetAck);
+  rpc StopBenchmark(StopRequest) returns (BotFleetAck);
 }
 
 message BenchmarkConfig {
@@ -20,6 +20,6 @@ message StopRequest {
   string submission_id = 1;
 }
 
-message Ack {
+message BotFleetAck {
   bool ok = 1;
 }
