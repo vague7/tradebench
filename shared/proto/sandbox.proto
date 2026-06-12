@@ -6,7 +6,7 @@ option go_package = "github.com/bench/shared/proto/gen";
 
 service SandboxEngine {
   rpc GetStatus(StatusRequest) returns (StatusResponse);
-  rpc KillContainer(KillRequest) returns (Ack);
+  rpc KillContainer(KillRequest) returns (SandboxAck);
 }
 
 message StatusRequest {
@@ -24,6 +24,6 @@ message StatusResponse {
   string error_message = 4;
 }
 
-message Ack {
+message SandboxAck {
   bool ok = 1;
 }

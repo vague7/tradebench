@@ -258,7 +258,7 @@ var file_sandbox_proto_goTypes = []any{
 	(*StatusRequest)(nil),  // 0: sandbox.StatusRequest
 	(*KillRequest)(nil),    // 1: sandbox.KillRequest
 	(*StatusResponse)(nil), // 2: sandbox.StatusResponse
-	(*SandboxAck)(nil),     // 3: sandbox.Ack
+	(*SandboxAck)(nil),            // 3: sandbox.Ack
 }
 var file_sandbox_proto_depIdxs = []int32{
 	0, // 0: sandbox.SandboxEngine.GetStatus:input_type -> sandbox.StatusRequest

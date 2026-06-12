@@ -25,7 +25,7 @@ echo "Uploading test submission..."
 UPLOAD_RES=$(curl -s -X POST "$API_BASE/api/submissions" \
   -H "Authorization: Bearer $TEAM_TOKEN" \
   -F "teamName=$TEAM_NAME" \
-  -F "zipFile=@scripts/$ZIP_FILE")
+  -F "file=@scripts/$ZIP_FILE")
 
 # Extract submissionId using python as it's more robust and available across OS
 SUB_ID=$(python -c "import sys, json; print(json.load(sys.stdin).get('submissionId', ''))" <<< "$UPLOAD_RES" 2>/dev/null || true)

@@ -269,15 +269,17 @@ func (s *PostgresStore) ListLeaderboard(ctx context.Context) ([]benchtypes.Leade
 		e.FinalScore *= 100
 		e.CorrectnessScore *= 100
 
-		if !isDisqualified {
-			entries = append(entries, e)
-		}
+		e.IsDisqualified = isDisqualified
+		entries = append(entries, e)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("postgres: leaderboard rows: %w", err)
 	}
 
 	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].IsDisqualified != entries[j].IsDisqualified {
+			return !entries[i].IsDisqualified
+		}
 		if entries[i].FinalScore != entries[j].FinalScore {
 			return entries[i].FinalScore > entries[j].FinalScore
 		}

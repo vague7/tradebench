@@ -212,7 +212,7 @@ var file_bot_fleet_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
 var file_bot_fleet_proto_goTypes = []any{
 	(*BenchmarkConfig)(nil), // 0: botfleet.BenchmarkConfig
 	(*StopRequest)(nil),     // 1: botfleet.StopRequest
-	(*BotFleetAck)(nil),     // 2: botfleet.Ack
+	(*BotFleetAck)(nil),             // 2: botfleet.Ack
 }
 var file_bot_fleet_proto_depIdxs = []int32{
 	0, // 0: botfleet.BotFleet.StartBenchmark:input_type -> botfleet.BenchmarkConfig

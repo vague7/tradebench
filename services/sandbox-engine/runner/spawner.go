@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 
+	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
@@ -59,11 +60,11 @@ func (s *Spawner) Spawn(imageTag, submissionID string) (string, int, error) {
 			ReadonlyRootfs: true,
 			SecurityOpt:    []string{"no-new-privileges:true"},
 			CapDrop:        []string{"ALL"},
-			PidsLimit:      int64Ptr(128),
 			Tmpfs:          map[string]string{"/tmp": "size=64m"},
 			Resources: container.Resources{
 				Memory:   512 * 1024 * 1024, // 512 MB
 				NanoCPUs: 1_000_000_000,     // 1.0 CPU
+				PidsLimit: int64Ptr(128),
 			},
 		},
 		&network.NetworkingConfig{
@@ -78,7 +79,7 @@ func (s *Spawner) Spawn(imageTag, submissionID string) (string, int, error) {
 		return "", 0, fmt.Errorf("spawner: container create: %w", err)
 	}
 
-	if err := s.docker.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
+	if err := s.docker.ContainerStart(ctx, resp.ID, types.ContainerStartOptions{}); err != nil {
 		return "", 0, fmt.Errorf("spawner: container start: %w", err)
 	}
 

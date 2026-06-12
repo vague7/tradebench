@@ -1,3 +1,10 @@
+/* ─────────────────────────────────────────────────────────
+ * Tradebench – Shared TypeScript Types
+ * Matches the PRD contract for all frontend ↔ backend comms.
+ * ─────────────────────────────────────────────────────────*/
+
+// ── Submission Lifecycle ──────────────────────────────────
+
 export type SubmissionStatus =
   | 'UPLOADED'
   | 'BUILDING'
@@ -16,6 +23,8 @@ export interface Submission {
   benchmarkEnd?: string;
 }
 
+// ── Telemetry / Metrics ───────────────────────────────────
+
 export interface MetricSnapshot {
   submissionId: string;
   windowEnd: string;
@@ -29,6 +38,8 @@ export interface MetricSnapshot {
   correctnessScore: number;
 }
 
+// ── Scoring ───────────────────────────────────────────────
+
 export interface Score {
   submissionId: string;
   teamName: string;
@@ -41,6 +52,8 @@ export interface Score {
   computedAt: string;
 }
 
+// ── Leaderboard ───────────────────────────────────────────
+
 export interface LeaderboardEntry {
   rank: number;
   teamName: string;
@@ -50,7 +63,11 @@ export interface LeaderboardEntry {
   errorRate: number;
   correctnessScore: number;
   status: SubmissionStatus;
+  isDisqualified: boolean;
+  updatedAt?: string;
 }
+
+// ── API Shapes ────────────────────────────────────────────
 
 export interface ApiErrorShape {
   error: string;
@@ -71,3 +88,18 @@ export interface LeaderboardStreamPayload {
   timestamp: string;
   rankings: LeaderboardEntry[];
 }
+
+// ── Connection / System State ─────────────────────────────
+
+export type ConnectionState = 'connected' | 'connecting' | 'reconnecting' | 'offline';
+
+export type ApiHealthState = 'online' | 'offline' | 'checking';
+
+// ── Benchmark Phases (from PRD load profile) ──────────────
+
+export type BenchmarkPhase =
+  | 'warm-up'
+  | 'ramp'
+  | 'sustained'
+  | 'spike'
+  | 'drain';

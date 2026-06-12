@@ -1,8 +1,14 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { getSubmissionResults, uploadSubmission } from '../api/client';
+import { BenchmarkPhaseTracker } from '../components/BenchmarkPhaseTracker';
+import { CopyButton } from '../components/CopyButton';
+import { ErrorBanner } from '../components/ErrorBanner';
+import { EventLog } from '../components/EventLog';
 import { MetricsPanel } from '../components/MetricsPanel';
-import { StatusBadge } from '../components/StatusBadge';
+import { SubmissionPipeline } from '../components/PipelineTracker';
+import { StatusPill } from '../components/StatusPill';
+import { showToast } from '../components/Toast';
 import { UploadForm } from '../components/UploadForm';
 import type { UploadFormData } from '../components/UploadForm';
 import { useSubmissionStatus } from '../hooks/useSubmissionStatus';
@@ -28,17 +34,27 @@ export function SubmitPage() {
       setTeamToken(data.token);
       setSnapshot(null);
       setScore(null);
+      showToast('success', `Submission created: ${result.submissionId.slice(0, 8)}…`);
     } catch (err) {
-      setUploadError(err instanceof Error ? err.message : 'Upload failed');
+      const msg = err instanceof Error ? err.message : 'Upload failed';
+      setUploadError(msg);
+      showToast('error', msg);
     } finally {
       setUploadLoading(false);
     }
   }, []);
 
-  // Auto-fetch results when submission reaches SCORED.
+  const handleReset = useCallback(() => {
+    setSubmissionId(null);
+    setTeamToken('');
+    setUploadError(null);
+    setSnapshot(null);
+    setScore(null);
+  }, []);
+
+  // Auto-fetch results when scored
   useEffect(() => {
     if (phase !== 'success' || !submissionId || !teamToken) return;
-
     let cancelled = false;
     const fetchResults = async () => {
       try {
@@ -46,69 +62,96 @@ export function SubmitPage() {
         if (!cancelled) {
           setSnapshot(results.snapshot);
           setScore(results.score);
+          showToast('success', 'Benchmark complete — results ready');
         }
-      } catch {
-        // Silently handle — results may not be available immediately.
-      }
+      } catch { /* results may not be immediately available */ }
     };
     void fetchResults();
     return () => { cancelled = true; };
   }, [phase, submissionId, teamToken]);
 
-  const phaseLabel = (): string => {
-    switch (phase) {
-      case 'idle': return 'Awaiting submission';
-      case 'loading': return 'Connecting to backend…';
-      case 'polling': return 'Polling status updates…';
-      case 'success': return 'Benchmark complete';
-      case 'failed': return 'Benchmark failed';
-      case 'timeout': return 'Polling timed out';
-    }
-  };
+  const isTerminal = phase === 'success' || phase === 'failed' || phase === 'timeout';
+  const hasSubmission = submission !== null;
 
   return (
-    <div className="page-grid">
-      <section className="hero-panel">
-        <div className="aurora-bg-container">
-          <div className="aurora-grid"></div>
-        </div>
-        <div className="hero-content">
-          <p className="eyebrow">Submission pipeline</p>
-          <h1>Upload your trading exchange and watch it get benchmarked in real time.</h1>
-          <p className="lead">
-            Submit a ZIP containing your Dockerfile and source code. The platform
-            will build, deploy, stress-test, and score your implementation automatically.
-          </p>
+    <div className="submit-layout">
+      {/* Left column: upload */}
+      <div className="submit-left">
+        {!hasSubmission && (
+          <UploadForm onSubmit={handleUpload} loading={uploadLoading} error={uploadError} />
+        )}
 
-          <div className="hero-status">
-            <span className="status-label">Pipeline phase</span>
-            <p className="phase-label">{phaseLabel()}</p>
-            {submission ? <StatusBadge status={submission.status} /> : null}
+        {hasSubmission && (
+          <div className="panel sub-card" id="submission-details">
+            <h3 className="section-label">Submission Details</h3>
+            <div className="sub-row">
+              <span className="sub-key">ID</span>
+              <span className="sub-val mono">
+                {submission.id.slice(0, 12)}…
+                <CopyButton text={submission.id} label="Copy submission ID" />
+              </span>
+            </div>
+            <div className="sub-row">
+              <span className="sub-key">Team</span>
+              <span className="sub-val">{submission.teamName}</span>
+            </div>
+            <div className="sub-row">
+              <span className="sub-key">Status</span>
+              <StatusPill status={submission.status} />
+            </div>
+            <div className="sub-row">
+              <span className="sub-key">Uploaded</span>
+              <span className="sub-val mono">{new Date(submission.uploadedAt).toLocaleTimeString()}</span>
+            </div>
+            {submission.benchmarkStart && (
+              <div className="sub-row">
+                <span className="sub-key">Bench start</span>
+                <span className="sub-val mono">{new Date(submission.benchmarkStart).toLocaleTimeString()}</span>
+              </div>
+            )}
+            {submission.benchmarkEnd && (
+              <div className="sub-row">
+                <span className="sub-key">Bench end</span>
+                <span className="sub-val mono">{new Date(submission.benchmarkEnd).toLocaleTimeString()}</span>
+              </div>
+            )}
+            {submission.errorMessage && (
+              <div className="sub-error">{submission.errorMessage}</div>
+            )}
+
+            {isTerminal && (
+              <button className="reset-btn" onClick={handleReset} type="button" id="reset-btn">
+                ← Submit another
+              </button>
+            )}
           </div>
+        )}
+      </div>
 
-          {submission ? (
-            <dl className="status-grid">
-              <div>
-                <dt>Submission</dt>
-                <dd>{submission.id}</dd>
-              </div>
-              <div>
-                <dt>Team</dt>
-                <dd>{submission.teamName}</dd>
-              </div>
-              <div>
-                <dt>Uploaded</dt>
-                <dd>{new Date(submission.uploadedAt).toLocaleString()}</dd>
-              </div>
-            </dl>
-          ) : null}
+      {/* Right column: pipeline + metrics */}
+      <div className="submit-right">
+        {/* Pipeline — always visible */}
+        <SubmissionPipeline currentStatus={hasSubmission ? submission.status : null} />
 
-          {pollError ? <p className="form-error" role="alert">{pollError}</p> : null}
-        </div>
-      </section>
+        {/* Error banner */}
+        {(phase === 'failed' || phase === 'timeout') && (
+          <ErrorBanner
+            title={phase === 'failed' ? 'Benchmark Failed' : 'Polling Timed Out'}
+            message={submission?.errorMessage ?? pollError ?? 'An unexpected error occurred during the benchmark pipeline.'}
+            detail={pollError ?? undefined}
+            onRetry={handleReset}
+          />
+        )}
 
-      <div className="stack">
-        <UploadForm onSubmit={handleUpload} loading={uploadLoading} error={uploadError} />
+        {/* Event log — only when submission is active */}
+        {hasSubmission && (
+          <EventLog status={submission.status} submissionId={submission.id} />
+        )}
+
+        {/* Phase tracker preview */}
+        <BenchmarkPhaseTracker activePhase={null} />
+
+        {/* Metrics — always visible with placeholders */}
         <MetricsPanel snapshot={snapshot} score={score} />
       </div>
     </div>

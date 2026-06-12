@@ -23,4 +23,5 @@ type LeaderboardEntry struct {
 	ErrorRate        float64          `json:"errorRate"`
 	CorrectnessScore float64          `json:"correctnessScore"`
 	Status           SubmissionStatus `json:"status"`
+	IsDisqualified   bool             `json:"isDisqualified"`
 }
