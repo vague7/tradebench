@@ -52,8 +52,9 @@ func computeScores(snap types.MetricSnapshot, targetTPS, maxP99Ms float64) (thro
 //  2. Apply disqualification rule (CorrectnessScore < 30.0).
 //  3. Fetch team name from the submissions table.
 //  4. Persist the Score to the scores table.
-//  5. Publish the MetricSnapshot JSON to Redis for SSE reads.
-//  6. Log the outcome.
+//  5. Write submission status → SCORED in the submissions table. ← E2E blocker fix
+//  6. Publish the MetricSnapshot JSON to Redis for SSE reads.
+//  7. Log the outcome.
 func (e *Engine) Score(ctx context.Context, snap types.MetricSnapshot) error {
 	// 1. Apply composite formula.
 	throughputScore, latencyScore, correctnessScore, finalScore := computeScores(snap, e.cfg.TargetTPS, e.cfg.MaxP99Ms)
@@ -97,7 +98,19 @@ func (e *Engine) Score(ctx context.Context, snap types.MetricSnapshot) error {
 		return fmt.Errorf("scoring: insert score for submission %s: %w", snap.SubmissionID, err)
 	}
 
-	// 5. Publish MetricSnapshot JSON to Redis.
+	// 5. Mark submission as SCORED in the submissions table.
+	// This is what the E2E test polls for via GET /api/submissions/:id/status.
+	if err := e.store.UpdateSubmissionStatus(ctx, snap.SubmissionID, "SCORED"); err != nil {
+		slog.Error("failed to mark submission as SCORED",
+			"submissionId", snap.SubmissionID,
+			"err", err,
+		)
+		// Score is already persisted — log but don't abort. The leaderboard
+		// will still show the score; only the status polling will be stale.
+		// This is recoverable: a retry on the next window tick will re-run Score().
+	}
+
+	// 6. Publish MetricSnapshot JSON to Redis (submission:{id}:snapshot, TTL 30s).
 	jsonBytes, err := json.Marshal(snap)
 	if err != nil {
 		slog.Warn("failed to marshal metric snapshot for Redis",
@@ -116,7 +129,7 @@ func (e *Engine) Score(ctx context.Context, snap types.MetricSnapshot) error {
 		}
 	}
 
-	// 6. Log the outcome.
+	// 7. Log the outcome.
 	slog.Info("score computed",
 		"submissionId", snap.SubmissionID,
 		"finalScore", finalScore,
