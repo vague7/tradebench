@@ -9,6 +9,7 @@ import (
 	"github.com/bench/telemetry-ingester/ingest"
 	"github.com/bench/telemetry-ingester/scoring"
 	"github.com/bench/telemetry-ingester/store"
+	"github.com/bench/telemetry-ingester/correctness"
 )
 
 // WindowManager manages the 10-second rolling window for metric aggregation.
@@ -19,15 +20,17 @@ type WindowManager struct {
 	buf       *ingest.RingBuffer
 	store     *store.PostgresStore
 	scorer    *scoring.Engine
+	validator *correctness.Validator
 }
 
 // NewWindowManager creates a new WindowManager.
-func NewWindowManager(windowSec int, buf *ingest.RingBuffer, store *store.PostgresStore, scorer *scoring.Engine) *WindowManager {
+func NewWindowManager(windowSec int, buf *ingest.RingBuffer, store *store.PostgresStore, scorer *scoring.Engine, validator *correctness.Validator) *WindowManager {
 	return &WindowManager{
 		windowSec: windowSec,
 		buf:       buf,
 		store:     store,
 		scorer:    scorer,
+		validator: validator,
 	}
 }
 
@@ -103,8 +106,11 @@ func (wm *WindowManager) computeAndPersist(ctx context.Context, submissionID str
 		}
 	}
 
-	// Correctness is Day 3/5 work — set to 0.0 for now.
-	correctnessScore := 0.0
+	correctnessScore, err := wm.validator.Validate(ctx, events)
+	if err != nil {
+		slog.Warn("correctness validation failed, defaulting to 0.0", "submissionId", submissionID, "err", err)
+		correctnessScore = 0.0
+	}
 
 	snapshot := types.MetricSnapshot{
 		SubmissionID:     submissionID,
