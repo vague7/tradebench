@@ -16,6 +16,7 @@ import (
 	"github.com/bench/telemetry-ingester/ingest"
 	"github.com/bench/telemetry-ingester/scoring"
 	"github.com/bench/telemetry-ingester/store"
+	"github.com/bench/telemetry-ingester/correctness"
 )
 
 func main() {
@@ -41,12 +42,15 @@ func main() {
 	// Create scoring engine.
 	scorer := scoring.NewEngine(cfg, pgStore, redisStore)
 
+	// Create correctness validator.
+	validator := correctness.NewValidator("./correctness/reference/bin/ref-engine")
+
 	// Create ring buffer and gRPC server.
 	buf := ingest.NewRingBuffer()
 	srv := ingest.NewServer(buf)
 
 	// Create window manager.
-	wm := aggregate.NewWindowManager(cfg.WindowSec, buf, pgStore, scorer)
+	wm := aggregate.NewWindowManager(cfg.WindowSec, buf, pgStore, scorer, validator)
 
 	// Create a cancellable context for the window manager.
 	ctx, cancel := context.WithCancel(context.Background())
