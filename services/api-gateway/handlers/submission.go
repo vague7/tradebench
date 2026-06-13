@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"archive/zip"
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -12,12 +14,11 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-	"archive/zip"
-	"bytes"
 
 	"github.com/bench/api-gateway/config"
 	"github.com/bench/api-gateway/middleware"
 	"github.com/bench/api-gateway/store"
+	benchtypes "github.com/bench/shared/types"
 )
 
 const submissionsBasePath = "/data/submissions"
@@ -46,18 +47,21 @@ type createSubmissionResponse struct {
 }
 
 type submissionStatusResponse struct {
-	ID             string                      `json:"id"`
-	TeamName       string                      `json:"teamName"`
-	Status         string                      `json:"status"`
-	ErrorMessage   string                      `json:"errorMessage,omitempty"`
-	UploadedAt     string                      `json:"uploadedAt"`
-	BenchmarkStart string                      `json:"benchmarkStart,omitempty"`
-	BenchmarkEnd   string                      `json:"benchmarkEnd,omitempty"`
+	ID             string `json:"id"`
+	TeamName       string `json:"teamName"`
+	Status         string `json:"status"`
+	ErrorMessage   string `json:"errorMessage,omitempty"`
+	UploadedAt     string `json:"uploadedAt"`
+	BenchmarkStart string `json:"benchmarkStart,omitempty"`
+	BenchmarkEnd   string `json:"benchmarkEnd,omitempty"`
 }
 
+// submissionResultsResponse uses concrete types so JSON encoding produces the full
+// typed structure the frontend expects (Score and MetricSnapshot fields), not a
+// Go struct string representation.
 type submissionResultsResponse struct {
-	Snapshot interface{} `json:"snapshot"`
-	Score    interface{} `json:"score"`
+	Snapshot benchtypes.MetricSnapshot `json:"snapshot"`
+	Score    benchtypes.Score          `json:"score"`
 }
 
 func (h *SubmissionHandler) handleCreateSubmission(w http.ResponseWriter, r *http.Request) {
@@ -79,10 +83,14 @@ func (h *SubmissionHandler) handleCreateSubmission(w http.ResponseWriter, r *htt
 	teamToken := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 	teamToken = strings.TrimSpace(teamToken)
 
-	file, _, err := r.FormFile("file")
+	// Accept both "zipFile" (frontend) and "file" (legacy) field names.
+	file, _, err := r.FormFile("zipFile")
 	if err != nil {
-		middleware.WriteAPIError(w, http.StatusBadRequest, "BAD_REQUEST", "file field is required")
-		return
+		file, _, err = r.FormFile("file")
+		if err != nil {
+			middleware.WriteAPIError(w, http.StatusBadRequest, "BAD_REQUEST", "zipFile field is required")
+			return
+		}
 	}
 	defer file.Close()
 
@@ -108,7 +116,7 @@ func (h *SubmissionHandler) handleCreateSubmission(w http.ResponseWriter, r *htt
 		slog.Info("duplicate submission, reusing existing",
 			"submissionId", existing.ID,
 			"zipHash", zipHash,
-			)
+		)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(createSubmissionResponse{SubmissionID: existing.ID})
@@ -116,8 +124,6 @@ func (h *SubmissionHandler) handleCreateSubmission(w http.ResponseWriter, r *htt
 	}
 
 	// ── 4. Create DB record to get UUID ───────────────────────────────────
-	// We need the ID for the storage path, so insert first with a temp path
-	// then update zip_path after saving the file
 	submissionID, err := h.store.CreateSubmission(ctx, teamName, teamToken, zipHash, "pending")
 	if err != nil {
 		slog.Error("failed to create submission record", "err", err)
@@ -142,12 +148,11 @@ func (h *SubmissionHandler) handleCreateSubmission(w http.ResponseWriter, r *htt
 
 	// ── 5b. Validate ZIP contains a Dockerfile ────────────────────────────
 	if err := validateZipHasDockerfile(fileBytes); err != nil {
-    slog.Warn("submission rejected: no Dockerfile in ZIP", "submissionId", submissionID)
-    // clean up the saved file and db record
-    _ = os.Remove(zipPath)
-    _ = os.Remove(submissionDir)
-    middleware.WriteAPIError(w, http.StatusUnprocessableEntity, "INVALID_SUBMISSION", "ZIP must contain a Dockerfile")
-    return
+		slog.Warn("submission rejected: no Dockerfile in ZIP", "submissionId", submissionID)
+		_ = os.Remove(zipPath)
+		_ = os.Remove(submissionDir)
+		middleware.WriteAPIError(w, http.StatusUnprocessableEntity, "INVALID_SUBMISSION", "ZIP must contain a Dockerfile")
+		return
 	}
 
 	// ── 6. Update zip_path in DB ──────────────────────────────────────────
@@ -172,7 +177,7 @@ func (h *SubmissionHandler) handleCreateSubmission(w http.ResponseWriter, r *htt
 		"submissionId", submissionID,
 		"teamName", teamName,
 		"zipHash", zipHash,
-		)
+	)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
@@ -268,15 +273,15 @@ func (h *SubmissionHandler) handleGetResults(w http.ResponseWriter, r *http.Requ
 
 // validateZipHasDockerfile returns an error if the ZIP bytes contain no "Dockerfile" entry.
 func validateZipHasDockerfile(data []byte) error {
-  r, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
-  if err != nil {
-    return fmt.Errorf("invalid zip: %w", err)
-  }
-  for _, f := range r.File {
-    name := filepath.Base(f.Name)
-    if name == "Dockerfile" {
-      return nil
-    }
-  }
-  return fmt.Errorf("no Dockerfile found in ZIP")
+	r, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		return fmt.Errorf("invalid zip: %w", err)
+	}
+	for _, f := range r.File {
+		name := filepath.Base(f.Name)
+		if name == "Dockerfile" {
+			return nil
+		}
+	}
+	return fmt.Errorf("no Dockerfile found in ZIP")
 }

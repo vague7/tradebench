@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/redis/go-redis/v9"
 	"github.com/bench/sandbox-engine/runner"
+	"github.com/redis/go-redis/v9"
 )
 
 const (
@@ -15,20 +15,30 @@ const (
 	consumerGroup = "sandbox-engine"
 	consumerName  = "sandbox-engine-1"
 	blockDuration = 5 * time.Second
+
+	// Redis key TTLs (PRD Section 4.4)
+	statusKeyTTL = time.Hour
+	readyKeyTTL  = 10 * time.Minute
 )
 
+// StatusUpdater is the interface the consumer uses to update submission state.
+// PostgresStatusUpdater satisfies this interface.
 type StatusUpdater interface {
 	UpdateStatus(ctx context.Context, submissionID, status, errMsg string) error
+	UpdateImageAndContainer(ctx context.Context, submissionID, imageTag, containerID string, containerPort int) error
 }
 
+// Consumer reads jobs from the Redis stream and drives each submission through
+// the Build → Spawn → HealthCheck → Ready pipeline.
 type Consumer struct {
-	rdb      *redis.Client
-	builder  *runner.Builder
-	spawner  *runner.Spawner
-	health   *runner.HealthChecker
-	db       StatusUpdater
-	registry *runner.Registry
-	sem      chan struct{} // concurrency limiter
+	rdb          *redis.Client
+	builder      *runner.Builder
+	spawner      *runner.Spawner
+	health       *runner.HealthChecker
+	db           StatusUpdater
+	registry     *runner.Registry
+	sem          chan struct{} // concurrency limiter
+	buildTimeout time.Duration
 }
 
 func NewConsumer(
@@ -39,18 +49,23 @@ func NewConsumer(
 	db StatusUpdater,
 	registry *runner.Registry,
 	maxConcurrent int,
+	buildTimeoutSec int,
 ) *Consumer {
 	if maxConcurrent <= 0 {
 		maxConcurrent = 1
 	}
+	if buildTimeoutSec <= 0 {
+		buildTimeoutSec = 120
+	}
 	return &Consumer{
-		rdb:      rdb,
-		builder:  builder,
-		spawner:  spawner,
-		health:   health,
-		db:       db,
-		registry: registry,
-		sem:      make(chan struct{}, maxConcurrent),
+		rdb:          rdb,
+		builder:      builder,
+		spawner:      spawner,
+		health:       health,
+		db:           db,
+		registry:     registry,
+		sem:          make(chan struct{}, maxConcurrent),
+		buildTimeout: time.Duration(buildTimeoutSec) * time.Second,
 	}
 }
 
@@ -60,7 +75,12 @@ func (c *Consumer) Run(ctx context.Context) error {
 		return fmt.Errorf("consumer: create group: %w", err)
 	}
 
-	slog.Info("consumer: listening", "stream", jobStreamKey, "group", consumerGroup, "maxConcurrent", cap(c.sem))
+	slog.Info("consumer: listening",
+		"stream", jobStreamKey,
+		"group", consumerGroup,
+		"maxConcurrent", cap(c.sem),
+		"buildTimeoutSec", c.buildTimeout.Seconds(),
+	)
 
 	for {
 		select {
@@ -90,7 +110,7 @@ func (c *Consumer) Run(ctx context.Context) error {
 
 		for _, stream := range streams {
 			for _, msg := range stream.Messages {
-				// Acquire slot — blocks if at capacity.
+				// Acquire concurrency slot — blocks if at capacity.
 				select {
 				case c.sem <- struct{}{}:
 				case <-ctx.Done():
@@ -98,7 +118,7 @@ func (c *Consumer) Run(ctx context.Context) error {
 				}
 
 				go func(m redis.XMessage) {
-					defer func() { <-c.sem }() // release slot when done
+					defer func() { <-c.sem }()
 
 					if err := c.process(ctx, m); err != nil {
 						slog.Error("consumer: process failed", "msgId", m.ID, "err", err)
@@ -122,38 +142,89 @@ func (c *Consumer) process(ctx context.Context, msg redis.XMessage) error {
 
 	imageTag := "bench-submission-" + submissionID
 
-	_ = c.db.UpdateStatus(ctx, submissionID, "BUILDING", "")
-	if err := c.builder.Build(zipPath, imageTag); err != nil {
-		_ = c.db.UpdateStatus(ctx, submissionID, "FAILED", err.Error())
+	// ── BUILDING ─────────────────────────────────────────────────────────────
+	c.setStatus(ctx, submissionID, "BUILDING", "")
+
+	// Apply build timeout from config (PRD FR-2: context.WithTimeout 120s).
+	buildCtx, buildCancel := context.WithTimeout(ctx, c.buildTimeout)
+	defer buildCancel()
+
+	if err := c.builder.Build(buildCtx, zipPath, imageTag); err != nil {
+		c.setStatus(ctx, submissionID, "FAILED", err.Error())
 		return fmt.Errorf("consumer: build: %w", err)
 	}
 
-	_ = c.db.UpdateStatus(ctx, submissionID, "RUNNING", "")
+	// ── RUNNING — spawn container ─────────────────────────────────────────────
+	c.setStatus(ctx, submissionID, "RUNNING", "")
+
 	containerID, port, err := c.spawner.Spawn(imageTag, submissionID)
 	if err != nil {
-		_ = c.db.UpdateStatus(ctx, submissionID, "FAILED", err.Error())
+		c.setStatus(ctx, submissionID, "FAILED", err.Error())
 		return fmt.Errorf("consumer: spawn: %w", err)
 	}
 
-	// Register before health check so watchdog can clean up on timeout.
+	// Write image_tag, container_id, container_port to Postgres (PRD schema).
+	if err := c.db.UpdateImageAndContainer(ctx, submissionID, imageTag, containerID, port); err != nil {
+		// Non-fatal — pipeline can continue; log for observability.
+		slog.Error("consumer: UpdateImageAndContainer failed",
+			"submissionId", submissionID,
+			"err", err,
+		)
+	}
+
+	// Register before health check so the watchdog can clean up on timeout.
 	c.registry.Add(submissionID, containerID, port, time.Now())
 
+	// ── HEALTH CHECK ─────────────────────────────────────────────────────────
 	if err := c.health.WaitReady(ctx, containerID); err != nil {
-		_ = c.db.UpdateStatus(ctx, submissionID, "FAILED", "health check failed: "+err.Error())
+		c.setStatus(ctx, submissionID, "FAILED", "health check failed: "+err.Error())
 		c.registry.Remove(submissionID)
 		return fmt.Errorf("consumer: health: %w", err)
 	}
 
-	_ = c.db.UpdateStatus(ctx, submissionID, "BENCHMARKING", "")
+	// ── BENCHMARKING — publish ready key for trigger watcher ──────────────────
+	c.setStatus(ctx, submissionID, "BENCHMARKING", "")
 
-	// Publish ready event for api-gateway to trigger bot-fleet.
 	readyKey := "submission:" + submissionID + ":ready"
-	_ = c.rdb.Set(ctx, readyKey, fmt.Sprintf("%s:%d", containerID, port), 10*time.Minute).Err()
+	targetHost := fmt.Sprintf("submission-%s:8080", shortID(submissionID))
+	_ = c.rdb.Set(ctx, readyKey, targetHost, readyKeyTTL).Err()
 
 	slog.Info("consumer: container ready",
 		"submissionId", submissionID,
 		"containerID", containerID,
 		"port", port,
+		"imageTag", imageTag,
 	)
 	return nil
+}
+
+// setStatus updates both Postgres and the Redis submission:{id}:status key.
+// Errors are logged but never returned — a status update failure must not abort
+// the pipeline; the container state is authoritative.
+func (c *Consumer) setStatus(ctx context.Context, submissionID, status, errMsg string) {
+	if err := c.db.UpdateStatus(ctx, submissionID, status, errMsg); err != nil {
+		slog.Error("consumer: UpdateStatus failed",
+			"submissionId", submissionID,
+			"status", status,
+			"err", err,
+		)
+	}
+
+	// Write Redis cache key: submission:{id}:status (PRD Section 4.4, TTL 1h).
+	redisKey := "submission:" + submissionID + ":status"
+	if err := c.rdb.Set(ctx, redisKey, status, statusKeyTTL).Err(); err != nil {
+		slog.Error("consumer: redis SetStatus failed",
+			"submissionId", submissionID,
+			"status", status,
+			"err", err,
+		)
+	}
+}
+
+// shortID returns the first 8 chars of a UUID (matches container naming convention).
+func shortID(id string) string {
+	if len(id) > 8 {
+		return id[:8]
+	}
+	return id
 }

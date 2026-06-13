@@ -4,16 +4,24 @@ import (
 	"context"
 	"log"
 	"log/slog"
+	"net"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
 	"github.com/redis/go-redis/v9"
+	"google.golang.org/grpc"
+
 	"github.com/bench/sandbox-engine/config"
+	sbgrpc "github.com/bench/sandbox-engine/grpc"
 	"github.com/bench/sandbox-engine/queue"
 	"github.com/bench/sandbox-engine/runner"
+	"github.com/bench/sandbox-engine/trigger"
+	gen "github.com/bench/shared/proto/gen"
 )
+
+const sandboxGRPCPort = ":9001"
 
 func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})))
@@ -35,7 +43,7 @@ func main() {
 	registry := runner.NewRegistry()
 	db := runner.NewPostgresStatusUpdater(os.Getenv("POSTGRES_DSN"))
 
-	// Watchdog: poll registry every 10s, kill containers past TTL.
+	// ── Watchdog: kill containers past TTL ───────────────────────────────────
 	go func() {
 		ticker := time.NewTicker(10 * time.Second)
 		defer ticker.Stop()
@@ -61,7 +69,38 @@ func main() {
 		}
 	}()
 
-	consumer := queue.NewConsumer(rdb, builder, spawner, healthChecker, db, registry, cfg.SandboxMaxConcurrent)
+	// ── SandboxEngine gRPC server on :9001 ───────────────────────────────────
+	lis, err := net.Listen("tcp", sandboxGRPCPort)
+	if err != nil {
+		log.Fatalf("FATAL: sandbox gRPC listen on %s failed: %v", sandboxGRPCPort, err)
+	}
+
+	grpcServer := grpc.NewServer()
+	sandboxSrv := sbgrpc.NewSandboxServer(registry, db, healthChecker)
+	gen.RegisterSandboxEngineServer(grpcServer, sandboxSrv)
+
+	go func() {
+		slog.Info("sandbox-engine gRPC server listening", "port", sandboxGRPCPort)
+		if err := grpcServer.Serve(lis); err != nil {
+			slog.Error("sandbox gRPC server error", "err", err)
+		}
+	}()
+
+	// Graceful gRPC shutdown on signal.
+	go func() {
+		<-ctx.Done()
+		grpcServer.GracefulStop()
+	}()
+
+	// ── Trigger watcher: poll Redis :ready keys → call BotFleet.StartBenchmark
+	w := trigger.NewWatcher(rdb)
+	go func() {
+		slog.Info("trigger watcher starting")
+		w.Run(ctx)
+	}()
+
+	// ── Redis stream consumer (blocking main goroutine) ───────────────────────
+	consumer := queue.NewConsumer(rdb, builder, spawner, healthChecker, db, registry, cfg.SandboxMaxConcurrent, cfg.SandboxBuildTimeout)
 
 	slog.Info("sandbox-engine starting",
 		"benchNetName", cfg.BenchNetName,
@@ -69,6 +108,7 @@ func main() {
 		"buildTimeoutSec", cfg.SandboxBuildTimeout,
 		"healthTimeoutSec", cfg.SandboxHealthTimeout,
 		"containerTTLsec", cfg.SandboxContainerTTL,
+		"grpcPort", sandboxGRPCPort,
 	)
 
 	if err := consumer.Run(ctx); err != nil && err != context.Canceled {

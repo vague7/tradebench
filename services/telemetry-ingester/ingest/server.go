@@ -24,11 +24,11 @@ func NewServer(buf *RingBuffer) *Server {
 // StreamEvents receives a client-streaming BotEventProto stream from bot-fleet.
 // Each received message is converted to types.BotEvent and pushed into the ring buffer.
 // If the buffer is full, the event is dropped and a warning is logged.
-func (s *Server) StreamEvents(stream grpc.ClientStreamingServer[gen.BotEventProto, gen.Ack]) error {
+func (s *Server) StreamEvents(stream grpc.ClientStreamingServer[gen.BotEventProto, gen.TelemetryAck]) error {
 	for {
 		proto, err := stream.Recv()
 		if err == io.EOF {
-			return stream.SendAndClose(&gen.Ack{Ok: true})
+			return stream.SendAndClose(&gen.TelemetryAck{Ok: true})
 		}
 		if err != nil {
 			slog.Error("failed to receive event from stream", "err", err)

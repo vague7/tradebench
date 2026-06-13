@@ -25,7 +25,10 @@ func NewBuilder() *Builder {
 	return &Builder{docker: cli}
 }
 
-func (b *Builder) Build(zipPath, imageTag string) error {
+// Build builds a Docker image from the ZIP at zipPath, tagging it imageTag.
+// ctx is used for the Docker build call — pass a context.WithTimeout to enforce
+// the SANDBOX_BUILD_TIMEOUT limit (PRD FR-2).
+func (b *Builder) Build(ctx context.Context, zipPath, imageTag string) error {
 	if zipPath == "" || imageTag == "" {
 		return fmt.Errorf("builder: zip path and image tag are required")
 	}
@@ -35,7 +38,6 @@ func (b *Builder) Build(zipPath, imageTag string) error {
 		return fmt.Errorf("builder: prepare build context: %w", err)
 	}
 
-	ctx := context.Background()
 	resp, err := b.docker.ImageBuild(ctx, tarBuf, types.ImageBuildOptions{
 		Tags:       []string{imageTag},
 		Dockerfile: "Dockerfile",
@@ -46,7 +48,8 @@ func (b *Builder) Build(zipPath, imageTag string) error {
 	}
 	defer resp.Body.Close()
 
-	// Drain build output; any error lines will surface as an error.
+	// Drain build output so the daemon releases resources.
+	// Any error lines in the stream surface as a non-nil error here.
 	if _, err := io.Copy(io.Discard, resp.Body); err != nil {
 		return fmt.Errorf("builder: read build output: %w", err)
 	}
