@@ -139,7 +139,7 @@ func main() {
 	)
 
 	// Construct default load profile
-	profile := fleet.DefaultProfile()
+	profile := fleet.DefaultProfile(cfg)
 
 	slog.Info("load profile configured",
 		"phases", len(profile),

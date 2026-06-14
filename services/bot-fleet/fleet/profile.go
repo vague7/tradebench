@@ -1,6 +1,10 @@
 package fleet
 
-import "time"
+import (
+	"time"
+	
+	"github.com/bench/bot-fleet/config"
+)
 
 // Phase name constants — FR-3.2.
 const (
@@ -24,16 +28,48 @@ type LoadProfile []Phase
 
 // DefaultProfile returns the five-phase load profile exactly as specified in FR-3.2.
 // These values are fixed in the PRD and are not configurable at runtime.
-func DefaultProfile() LoadProfile {
+func DefaultProfile(
+	cfg *config.Config,
+) LoadProfile {
+
 	return LoadProfile{
-		{Name: PhaseWarmUp, DurationSec: 30, TargetBotCount: 500, LinearRamp: true},
-		{Name: PhaseRamp, DurationSec: 60, TargetBotCount: 10_000, LinearRamp: true},
-		{Name: PhaseSustained, DurationSec: 120, TargetBotCount: 10_000, LinearRamp: false},
-		{Name: PhaseSpike, DurationSec: 30, TargetBotCount: 50_000, LinearRamp: false},
-		{Name: PhaseDrain, DurationSec: 30, TargetBotCount: 0, LinearRamp: true},
+
+		{
+			Name:           PhaseWarmUp,
+			DurationSec:    cfg.WarmupDuration,
+			TargetBotCount: cfg.WarmupCount,
+			LinearRamp:     true,
+		},
+
+		{
+			Name:           PhaseRamp,
+			DurationSec:    cfg.RampDuration,
+			TargetBotCount: cfg.RampCount,
+			LinearRamp:     true,
+		},
+
+		{
+			Name:           PhaseSustained,
+			DurationSec:    cfg.SustainedDuration,
+			TargetBotCount: cfg.SustainedCount,
+			LinearRamp:     false,
+		},
+
+		{
+			Name:           PhaseSpike,
+			DurationSec:    cfg.SpikeDuration,
+			TargetBotCount: cfg.SpikeCount,
+			LinearRamp:     false,
+		},
+
+		{
+			Name:           PhaseDrain,
+			DurationSec:    cfg.DrainDuration,
+			TargetBotCount: 0,
+			LinearRamp:     true,
+		},
 	}
 }
-
 // TotalDuration returns the sum of all phase durations.
 // Used by the coordinator to pre-compute the benchmark's total runtime for logging.
 func (lp LoadProfile) TotalDuration() time.Duration {
