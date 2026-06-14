@@ -14,6 +14,20 @@ type Config struct {
 	TargetTPS        float64 // BOT_TARGET_TPS: target TPS for observability logging
 	TelemetryGRPCAddr string // TELEMETRY_GRPC_ADDR: gRPC address of telemetry-ingester
 	FleetGRPCPort    string  // BOT_FLEET_GRPC_PORT: port for bot-fleet's own gRPC server
+
+	WarmupDuration int
+	WarmupCount    int
+
+	RampDuration int
+	RampCount    int
+
+	SustainedDuration int
+	SustainedCount    int
+
+	SpikeDuration int
+	SpikeCount    int
+
+	DrainDuration int
 }
 
 // Load reads all required environment variables and returns a Config.
@@ -31,6 +45,15 @@ func Load() *Config {
 		TargetTPS:         requiredFloat64("BOT_TARGET_TPS"),
 		TelemetryGRPCAddr: required("TELEMETRY_GRPC_ADDR"),
 		FleetGRPCPort:     port,
+		WarmupDuration: requiredInt("BOT_WARMUP_DURATION"),
+		WarmupCount: requiredInt("BOT_WARMUP_COUNT"),
+		RampDuration: requiredInt("BOT_RAMP_DURATION"),
+		RampCount: requiredInt("BOT_RAMP_COUNT"),
+		SustainedDuration: requiredInt("BOT_SUSTAINED_DURATION"),
+		SustainedCount: requiredInt("BOT_SUSTAINED_COUNT"),
+		SpikeDuration: requiredInt("BOT_SPIKE_DURATION"),
+		SpikeCount: requiredInt("BOT_SPIKE_COUNT"),
+		DrainDuration: requiredInt("BOT_DRAIN_DURATION"),
 	}
 }
 

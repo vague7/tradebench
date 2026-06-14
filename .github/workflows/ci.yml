@@ -1,0 +1,259 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # ─────────────────────────────────────────────────────────────
+  # Job 1: Unit tests
+  # ─────────────────────────────────────────────────────────────
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache-dependency-path: go.work.sum
+
+      - name: api-gateway — middleware
+        run: go test ./middleware/... -v -count=1
+        working-directory: services/api-gateway
+
+      - name: api-gateway — handlers
+        run: go test ./handlers/... -v -count=1
+        working-directory: services/api-gateway
+
+      - name: sandbox-engine — queue
+        run: go test ./queue/... -v -count=1
+        working-directory: services/sandbox-engine
+
+      - name: bot-fleet — generator
+        run: go test ./bot/... -v -count=1
+        working-directory: services/bot-fleet
+
+      - name: telemetry-ingester — scoring
+        run: go test ./scoring/... -v -count=1
+        working-directory: services/telemetry-ingester
+
+      - name: telemetry-ingester — aggregate
+        run: go test ./aggregate/... -v -count=1
+        working-directory: services/telemetry-ingester
+
+      - name: telemetry-ingester — correctness
+        run: go test ./correctness/... -v -count=1
+        working-directory: services/telemetry-ingester
+
+  # ─────────────────────────────────────────────────────────────
+  # Job 2: Compile check — each module built individually
+  # go.work modules cannot be globbed via ./services/...
+  # ─────────────────────────────────────────────────────────────
+  build:
+    name: Build Services
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache-dependency-path: go.work.sum
+
+      - name: Build api-gateway
+        run: go build ./...
+        working-directory: services/api-gateway
+
+      - name: Build sandbox-engine
+        run: go build ./...
+        working-directory: services/sandbox-engine
+
+      - name: Build bot-fleet
+        run: go build ./...
+        working-directory: services/bot-fleet
+
+      - name: Build telemetry-ingester
+        run: go build ./...
+        working-directory: services/telemetry-ingester
+
+  # ─────────────────────────────────────────────────────────────
+  # Job 3: Docker image builds
+  # ─────────────────────────────────────────────────────────────
+  docker-build:
+    name: Docker Builds
+    runs-on: ubuntu-latest
+    needs: [unit-tests, build]
+    if: github.event_name == 'push'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build api-gateway
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: services/api-gateway/Dockerfile
+          push: false
+          tags: tradebench/api-gateway:ci
+          cache-from: type=gha,scope=api-gateway
+          cache-to: type=gha,mode=max,scope=api-gateway
+
+      - name: Build sandbox-engine
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: services/sandbox-engine/Dockerfile
+          push: false
+          tags: tradebench/sandbox-engine:ci
+          cache-from: type=gha,scope=sandbox-engine
+          cache-to: type=gha,mode=max,scope=sandbox-engine
+
+      - name: Build bot-fleet
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: services/bot-fleet/Dockerfile
+          push: false
+          tags: tradebench/bot-fleet:ci
+          cache-from: type=gha,scope=bot-fleet
+          cache-to: type=gha,mode=max,scope=bot-fleet
+
+      - name: Build telemetry-ingester
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: services/telemetry-ingester/Dockerfile
+          push: false
+          tags: tradebench/telemetry-ingester:ci
+          cache-from: type=gha,scope=telemetry-ingester
+          cache-to: type=gha,mode=max,scope=telemetry-ingester
+
+  # ─────────────────────────────────────────────────────────────
+  # Job 4: E2E test
+  # ─────────────────────────────────────────────────────────────
+  e2e:
+    name: E2E Test
+    runs-on: ubuntu-latest
+    needs: [unit-tests, build]
+    if: github.event_name == 'push'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Create .env for CI
+        run: |
+          cat > .env << 'ENVEOF'
+          POSTGRES_DSN=postgres://bench:bench@postgres:5432/bench
+          REDIS_ADDR=redis:6379
+          SANDBOX_MAX_CONCURRENT=10
+          SANDBOX_BUILD_TIMEOUT=120
+          SANDBOX_HEALTH_TIMEOUT=30
+          SANDBOX_CONTAINER_TTL=1800
+          BENCH_NET_NAME=tradebench_bench-net
+          BOT_DEFAULT_COUNT=500
+          BOT_TIMEOUT_MS=500
+          BOT_WARMUP_DURATION=20
+          BOT_WARMUP_COUNT=50
+          BOT_RAMP_DURATION=30
+          BOT_RAMP_COUNT=100
+          BOT_SUSTAINED_DURATION=60
+          BOT_SUSTAINED_COUNT=200
+          BOT_SPIKE_DURATION=20
+          BOT_SPIKE_COUNT=300
+          BOT_DRAIN_DURATION=20
+          BOT_TARGET_TPS=1000
+          BOT_MAX_P99_MS=1000
+          TELEMETRY_WINDOW_SEC=10
+          UPLOAD_MAX_BYTES=52428800
+          LEADERBOARD_SSE_INTERVAL_MS=2000
+          ADMIN_TOKEN=changeme-admin
+          TELEMETRY_ADDR=telemetry-ingester:9003
+          TELEMETRY_GRPC_ADDR=telemetry-ingester:9003
+          ENVEOF
+
+      - name: Build services (sequential — prevents OOM)
+        run: |
+          docker compose build api-gateway
+          docker compose build sandbox-engine
+          docker compose build bot-fleet
+          docker compose build telemetry-ingester
+          docker compose build frontend
+
+      - name: Start platform
+        run: docker compose up -d
+
+      - name: Wait for migrator
+        run: |
+          echo "Waiting for migrator..."
+          for i in $(seq 1 30); do
+            STATUS=$(docker inspect --format='{{.State.Status}}' tradebench_migrator_1 2>/dev/null || echo "missing")
+            EXIT=$(docker inspect --format='{{.State.ExitCode}}' tradebench_migrator_1 2>/dev/null || echo "1")
+            if [ "$STATUS" = "exited" ]; then
+              if [ "$EXIT" = "0" ]; then
+                echo "Migrations complete."
+                break
+              else
+                echo "Migrator failed (exit $EXIT):"
+                docker logs tradebench_migrator_1
+                exit 1
+              fi
+            fi
+            echo "  migrator: $STATUS (attempt $i/30)"
+            sleep 5
+          done
+
+      - name: Wait for api-gateway
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8080/api/leaderboard > /dev/null 2>&1; then
+              echo "api-gateway ready."
+              break
+            fi
+            echo "  not ready (attempt $i/30)"
+            sleep 3
+          done
+
+      - name: Patch E2E timeout
+        # Benchmark phases: 20+30+60+20+20 = 150s. 300s = 2x headroom.
+        run: sed -i 's/TIMEOUT=.*/TIMEOUT=300/' scripts/test_e2e.sh
+
+      - name: Run E2E test
+        run: make test-e2e
+
+      - name: Print logs on failure
+        if: failure()
+        run: |
+          echo "=== api-gateway ==="
+          docker compose logs api-gateway --tail=80
+          echo "=== sandbox-engine ==="
+          docker compose logs sandbox-engine --tail=80
+          echo "=== bot-fleet ==="
+          docker compose logs bot-fleet --tail=80
+          echo "=== telemetry-ingester ==="
+          docker compose logs telemetry-ingester --tail=80
+          echo "=== migrator ==="
+          docker compose logs migrator
+          echo "=== postgres ==="
+          docker compose logs postgres --tail=30
+
+      - name: Tear down
+        if: always()
+        run: make down

@@ -1,118 +1,1162 @@
-# Tradebench Architecture
+# TradeBench Architecture
 
-This document describes the overall architecture of the Tradebench platform, the data flow, and frontend component structure.
+## Overview
 
-## High-Level System Architecture
+TradeBench is a distributed benchmarking platform for evaluating trading exchange implementations.
 
-Tradebench is composed of several microservices coordinated via Docker Compose, communicating via REST, Server-Sent Events (SSE), and gRPC.
+The system accepts contestant submissions as ZIP archives, builds them into Docker images, deploys them inside isolated containers, benchmarks them under concurrent load, aggregates telemetry, computes scores, and publishes a live leaderboard.
+
+The architecture favors:
+
+- service separation
+    
+- explicit contracts
+    
+- asynchronous pipelines
+    
+- container isolation
+    
+- deterministic scoring
+    
+- minimal external dependencies
+    
+
+---
+
+# Goals
+
+### Functional Goals
+
+- Automated submission pipeline
+    
+- Isolated execution of untrusted code
+    
+- Large scale concurrent benchmarking
+    
+- Real-time leaderboard
+    
+- Deterministic scoring
+    
+
+---
+
+### Non Functional Goals
+
+- Single command deployment
+    
+
+```bash
+docker compose up
+```
+
+- Secure container execution
+    
+- Failure isolation
+    
+- Horizontally scalable benchmark layer
+    
+- Observable execution pipeline
+    
+
+---
+
+# Architecture Principles
+
+### 1. Shared Contracts
+
+Inter-service communication occurs only through:
+
+- REST
+    
+- Redis Streams
+    
+- gRPC
+    
+
+Shared protobuf definitions live in:
+
+```text
+shared/proto
+```
+
+and are generated into:
+
+```text
+shared/proto/gen
+```
+
+---
+
+### 2. Asynchronous Pipeline
+
+Benchmarking is asynchronous.
+
+Uploads do not block until benchmarking completes.
+
+The API returns immediately after:
+
+- file upload
+    
+- DB insert
+    
+- Redis enqueue
+    
+
+The remaining pipeline runs in the background.
+
+---
+
+### 3. Untrusted Code Isolation
+
+Contestant code:
+
+- never joins platform-net
+    
+- never sees Postgres
+    
+- never sees Redis
+    
+- has no internet access
+    
+- runs as non-root
+    
+
+Isolation is enforced by Docker networking.
+
+---
+
+# High Level Architecture
 
 ```mermaid
 graph TD
-    %% Define styles
-    classDef frontend fill:#e8f4f8,stroke:#0288d1,stroke-width:2px;
-    classDef service fill:#f3e5f5,stroke:#8e24aa,stroke-width:2px;
-    classDef datastore fill:#fff3e0,stroke:#f57c00,stroke-width:2px;
-    classDef sandbox fill:#e8f5e9,stroke:#388e3c,stroke-width:2px;
-    classDef external fill:#eceff1,stroke:#607d8b,stroke-width:2px;
 
-    %% Nodes
-    Client[Web Client\nReact/Vite]:::frontend
-    Gateway[API Gateway\nGo]:::service
-    Engine[Sandbox Engine\nGo]:::service
-    Fleet[Bot Fleet\nGo]:::service
-    Telemetry[Telemetry Ingester\nGo]:::service
-    
-    PG[(PostgreSQL\nTimescaleDB)]:::datastore
-    Redis[(Redis\nPubSub/Streams)]:::datastore
-    
-    Contestant[(Contestant Container\nIsolated)]:::sandbox
-    
-    %% Edges
-    Client -- "REST (Upload, Status)" --> Gateway
-    Client -- "SSE (Leaderboard)" --> Gateway
-    
-    Gateway -- "Read/Write" --> PG
-    Gateway -- "Enqueue Job" --> Redis
-    
-    Engine -- "Consume Job" --> Redis
-    Engine -- "Update Status" --> PG
-    Engine -- "Build & Run" --> Contestant
-    Engine -- "Publish Ready" --> Redis
-    
-    Gateway -- "Trigger Bench" --> Fleet
-    Fleet -- "Load Test" --> Contestant
-    
-    Fleet -- "Metrics" --> Telemetry
-    Telemetry -- "Aggregates" --> PG
-    
-    subgraph "Docker Network: bench-net"
-    Contestant
-    Fleet
-    end
-    
-    subgraph "Docker Network: platform-net"
-    Gateway
-    Engine
-    Telemetry
-    PG
-    Redis
-    end
+User
+
+Frontend["Frontend"]
+
+Gateway["API Gateway"]
+
+Redis[(Redis Streams)]
+
+PG[(Postgres + TimescaleDB)]
+
+Sandbox["Sandbox Engine"]
+
+Submission["Submission Container"]
+
+Fleet["Bot Fleet"]
+
+Telemetry["Telemetry Ingester"]
+
+User --> Frontend
+
+Frontend --> Gateway
+
+Gateway --> Redis
+
+Gateway --> PG
+
+Redis --> Sandbox
+
+Sandbox --> Submission
+
+Gateway --> Fleet
+
+Fleet --> Submission
+
+Fleet --> Telemetry
+
+Telemetry --> PG
+
+Gateway --> Frontend
 ```
 
-## Frontend Component Tree & Data Flow
+---
 
-The frontend is a React application built with Vite. It uses a purely state-driven approach for routing (no React Router) and emphasizes separation of transport logic from UI presentation.
+# Docker Networks
 
-### Component Structure
+Two isolated bridge networks exist.
+
+---
+
+## platform-net
+
+Connected services:
+
+- api-gateway
+    
+- sandbox-engine
+    
+- bot-fleet
+    
+- telemetry-ingester
+    
+- postgres
+    
+- redis
+    
+
+Purpose:
+
+Internal service communication.
+
+---
+
+## bench-net
+
+Connected services:
+
+- bot-fleet
+    
+- contestant containers
+    
+
+Purpose:
+
+Benchmark traffic only.
+
+Configured as:
+
+```yaml
+internal: true
+```
+
+No internet access.
+
+No database access.
+
+No Redis access.
+
+Only Bot Fleet may communicate with submissions.
+
+This is the primary security boundary.
+
+---
+
+# Upload Flow
+
+```mermaid
+sequenceDiagram
+
+participant User
+
+participant Gateway
+
+participant PG
+
+participant Redis
+
+User->>Gateway: POST /api/submissions
+
+Gateway->>Gateway: SHA256 hash
+
+Gateway->>PG: Insert submission
+
+Gateway->>Redis: XADD stream:jobs
+
+Gateway-->>User: submissionId
+```
+
+---
+
+## Deduplication
+
+Duplicate submissions are detected using:
+
+```text
+zip_hash
+```
+
+stored in:
+
+```text
+submissions.zip_hash
+```
+
+If hash exists:
+
+```text
+reuse previous submission
+```
+
+instead of building again.
+
+This optimization caused debugging confusion during E2E testing because uploads reused old IDs.
+
+---
+
+# Redis Architecture
+
+Redis Streams are used as the job queue.
+
+---
+
+## Stream
+
+```text
+stream:jobs
+```
+
+Producer:
+
+```text
+api-gateway
+```
+
+Consumer:
+
+```text
+sandbox-engine
+```
+
+---
+
+## Consumer Group
+
+```text
+sandbox-engine
+```
+
+Consumer groups provide:
+
+- at least once delivery
+    
+- consumer state tracking
+    
+- replay
+    
+- crash recovery
+    
+
+---
+
+### Failure Mode
+
+Deleting:
+
+```text
+stream:jobs
+```
+
+or:
+
+```text
+XGROUP DESTROY
+```
+
+breaks the pipeline.
+
+The sandbox consumer receives:
+
+```text
+NOGROUP
+```
+
+and submissions remain:
+
+```text
+UPLOADED
+```
+
+forever.
+
+Humans delete queues to "clean things up". Redis remembers and retaliates.
+
+---
+
+# Sandbox Engine
+
+Responsible for:
+
+- Docker image build
+    
+- Container creation
+    
+- Health checks
+    
+- Status updates
+    
+- Container destruction
+    
+
+---
+
+## Build Pipeline
 
 ```mermaid
 graph TD
-    App[App.tsx\n(View Switcher)] --> TopBar[TopBar.tsx]
-    App --> Submit[Submit.tsx\n(Page)]
-    App --> Leaderboard[Leaderboard.tsx\n(Page)]
-    
-    Submit --> UploadForm[UploadForm.tsx]
-    Submit --> PipelineTracker[PipelineTracker.tsx]
-    Submit --> MetricsPanel[MetricsPanel.tsx]
-    Submit --> hooks[useSubmissionStatus.ts]
-    
-    Leaderboard --> LeaderboardTable[LeaderboardTable.tsx]
-    LeaderboardTable --> StatusBadge[StatusBadge.tsx]
-    Leaderboard --> SSEClient[sse.ts\n(Transport)]
+
+ZIP
+
+Extract
+
+DockerBuild
+
+ImageTag
+
+Run
+
+Health
+
+ZIP --> Extract
+
+Extract --> DockerBuild
+
+DockerBuild --> ImageTag
+
+ImageTag --> Run
+
+Run --> Health
 ```
 
-### Data Flow
+---
 
-1.  **Submission Flow:** 
-    - The user uploads a ZIP in `UploadForm`.
-    - `Submit.tsx` receives the `submissionId` and begins polling via `useSubmissionStatus`.
-    - `useSubmissionStatus` polls `GET /api/submissions/:id/status` and yields phase transitions (`idle` → `loading` → `polling` → `success`/`failed`/`timeout`).
-    - The `PipelineTracker` visually reflects the current status (`UPLOADED`, `BUILDING`, `RUNNING`, etc.).
-    - When the phase becomes `success` (i.e. status is `SCORED`), `Submit.tsx` fetches the final results (`GET /api/submissions/:id/results`) and displays the `MetricsPanel`.
+## Docker Build
 
-2.  **Leaderboard Flow:**
-    - `Leaderboard.tsx` initially fetches the static leaderboard via `GET /api/leaderboard`.
-    - It immediately establishes an SSE connection using `LeaderboardSSEClient` (`GET /api/leaderboard/stream`).
-    - The SSE stream pushes new rankings whenever a benchmark finishes.
-    - `LeaderboardTable` maintains a reference to the previous rankings to compute rank changes (▲/▼) and applies CSS flash animations to updated rows.
+Build uses:
 
-## API Contracts & Design Decisions
+```text
+docker build
+```
 
-### 1. Presentation-Agnostic Transport
-All API calls are localized in `api/client.ts` and `api/sse.ts`. React components never call `fetch` or instantiate `EventSource` directly. The `LeaderboardSSEClient` is a pure transport wrapper that provides a robust reconnect cycle without cluttering the UI component with side effects.
+against extracted ZIP contents.
 
-### 2. Error Handling
-All responses from the backend are wrapped in a standard `ApiErrorShape` (`{ error: string, code: string }`). The frontend `parseResponse` utility intercepts non-OK responses and throws an `ApiError` instance, ensuring that UI components can catch and display consistent error messages.
+Image naming:
 
-### 3. Asynchronous Benchmarking Pipeline
-The backend handles benchmarking asynchronously using Redis Streams:
-- `api-gateway` uploads the file, creates a DB record, and enqueues the job to Redis (`stream:jobs`).
-- `sandbox-engine` consumes the job, builds the Docker image, and spawns the container on `bench-net`.
-- Once the container is healthy, `sandbox-engine` publishes a `ready` event to Redis.
-- A trigger watcher in `api-gateway` listens for `ready` events and triggers the `bot-fleet` via gRPC to begin load testing.
+```text
+bench-submission-{uuid}
+```
 
-### 4. Network Isolation
-Security is enforced at the network level. Contestant containers are spawned by `sandbox-engine` onto a completely isolated bridge network called `bench-net`. Only the `bot-fleet` is connected to both `platform-net` and `bench-net`, acting as the sole ingress point for the load tests. Contestant code cannot reach the internet or the database.
+---
 
-### 5. Leaderboard SSE Strategy
-The `api-gateway` uses an active polling ticker (every 2 seconds by default) to broadcast the latest leaderboard to all connected SSE clients, ensuring real-time updates for all observers during active benchmarking.
+### Important Fix
+
+Originally:
+
+```go
+io.Copy(io.Discard, resp.Body)
+```
+
+Docker build errors were ignored.
+
+Builder always returned:
+
+```go
+nil
+```
+
+even on failure.
+
+The implementation now parses Docker JSON output and surfaces:
+
+```json
+{
+"error":"..."
+}
+```
+
+correctly.
+
+---
+
+# Container Lifecycle
+
+Container name:
+
+```text
+submission-{id}
+```
+
+Lifecycle:
+
+```text
+CREATED
+
+↓
+
+RUNNING
+
+↓
+
+HEALTHY
+
+↓
+
+BENCHMARKING
+
+↓
+
+STOPPED
+
+↓
+
+REMOVED
+```
+
+---
+
+# Health Check
+
+Sandbox repeatedly polls:
+
+```text
+GET /health
+```
+
+until:
+
+```text
+HTTP 200
+```
+
+or timeout.
+
+---
+
+### Previous Failure
+
+Originally:
+
+```text
+127.0.0.1
+```
+
+was used.
+
+Inside Docker:
+
+```text
+127.0.0.1 == myself
+```
+
+not:
+
+```text
+submission container
+```
+
+Fix:
+
+Inspect container IP on:
+
+```text
+bench-net
+```
+
+and call:
+
+```text
+http://<container-ip>:8080/health
+```
+
+---
+
+# Sandbox Security
+
+Containers run with:
+
+- non-root user
+    
+- read only root filesystem
+    
+- `/tmp` writable
+    
+- no Linux capabilities
+    
+- memory limit
+    
+- CPU limit
+    
+- no new privileges
+    
+- isolated network
+    
+
+---
+
+# Bot Fleet
+
+Responsible for:
+
+- spawning bots
+    
+- order generation
+    
+- concurrency control
+    
+- adversarial testing
+    
+- telemetry emission
+    
+
+---
+
+# Benchmark Phases
+
+```text
+Warmup
+
+↓
+
+Ramp Up
+
+↓
+
+Sustained Load
+
+↓
+
+Spike
+
+↓
+
+Drain
+```
+
+Load profiles are defined in:
+
+```text
+fleet/profile.go
+```
+
+---
+
+# Bot Model
+
+Each bot:
+
+```text
+Generate Order
+
+↓
+
+Send HTTP Request
+
+↓
+
+Measure Latency
+
+↓
+
+Parse Response
+
+↓
+
+Build BotEvent
+
+↓
+
+Stream to Telemetry
+```
+
+Bots run as goroutines.
+
+Concurrency is coordinated centrally.
+
+---
+
+# Order Types
+
+Supported:
+
+```text
+LIMIT
+
+MARKET
+
+CANCEL
+```
+
+Implemented as:
+
+```go
+OrderTypeLimit
+
+OrderTypeMarket
+
+OrderTypeCancel
+```
+
+---
+
+# Telemetry Ingester
+
+Receives benchmark events using:
+
+```protobuf
+rpc StreamEvents(stream BotEventProto)
+```
+
+---
+
+## Event Structure
+
+Each event contains:
+
+- submission id
+    
+- bot id
+    
+- order id
+    
+- sent time
+    
+- ack time
+    
+- HTTP status
+    
+- expected fill
+    
+- actual fill
+    
+
+---
+
+# Aggregation Pipeline
+
+```mermaid
+graph TD
+
+Stream
+
+RingBuffer
+
+RollingWindow
+
+Percentiles
+
+Score
+
+Postgres
+
+Stream --> RingBuffer
+
+RingBuffer --> RollingWindow
+
+RollingWindow --> Percentiles
+
+Percentiles --> Score
+
+Score --> Postgres
+```
+
+---
+
+## Aggregates
+
+Computed:
+
+- TPS
+    
+- p50 latency
+    
+- p90 latency
+    
+- p99 latency
+    
+- success count
+    
+- failure count
+    
+- timeout count
+    
+- correctness
+    
+
+---
+
+# Database Schema
+
+## submissions
+
+Stores:
+
+```text
+submission metadata
+
+status
+
+zip hash
+
+image tag
+
+container id
+
+timestamps
+```
+
+States:
+
+```text
+UPLOADED
+
+BUILDING
+
+RUNNING
+
+BENCHMARKING
+
+SCORED
+
+FAILED
+```
+
+---
+
+## metric_snapshots
+
+Timeseries table.
+
+Stores:
+
+- TPS
+    
+- p50 latency
+    
+- p90 latency
+    
+- p99 latency
+    
+- correctness
+    
+- success count
+    
+- failures
+    
+- timeouts
+    
+
+Implemented as:
+
+```sql
+create_hypertable(
+'metric_snapshots',
+'window_end'
+)
+```
+
+using TimescaleDB.
+
+---
+
+## scores
+
+Stores:
+
+- throughput score
+    
+- latency score
+    
+- correctness score
+    
+- final score
+    
+- disqualification status
+    
+- computed timestamp
+    
+
+Unique:
+
+```text
+submission_id
+```
+
+to support UPSERT.
+
+---
+
+# Scoring Engine
+
+Final score:
+
+```text
+0.40 × Throughput
+
++
+
+0.40 × Latency
+
++
+
+0.20 × Correctness
+```
+
+---
+
+Disqualification:
+
+```text
+correctness < 30%
+```
+
+Submission remains visible but marked:
+
+```text
+DISQUALIFIED
+```
+
+---
+
+# Leaderboard
+
+Leaderboard data lives in:
+
+```text
+scores
+```
+
+and is exposed via:
+
+```text
+GET /api/leaderboard
+```
+
+and:
+
+```text
+GET /api/leaderboard/stream
+```
+
+---
+
+# SSE Strategy
+
+The API Gateway:
+
+- maintains client connections
+    
+- polls leaderboard periodically
+    
+- broadcasts updates
+    
+
+This design was chosen because:
+
+- leaderboard traffic is server→client only
+    
+- simpler than WebSockets
+    
+- native browser support
+    
+
+---
+
+# Frontend Architecture
+
+Built with:
+
+```text
+React
+
+Vite
+
+TypeScript
+```
+
+---
+
+## Pages
+
+```text
+Submit
+
+Leaderboard
+```
+
+---
+
+## Components
+
+```text
+UploadForm
+
+PipelineTracker
+
+MetricsPanel
+
+LeaderboardTable
+
+EventLog
+
+StatusBadge
+```
+
+---
+
+## Hooks
+
+```text
+useSubmissionStatus
+
+useLeaderboardStream
+
+useApiHealth
+```
+
+---
+
+# Tradeoffs
+
+---
+
+## Redis Streams vs Kafka
+
+Chosen:
+
+```text
+Redis Streams
+```
+
+Reasons:
+
+- single binary
+    
+- simple setup
+    
+- sufficient throughput
+    
+- native consumer groups
+    
+
+---
+
+Kafka advantages:
+
+- durable logs
+    
+- partitioning
+    
+- replay
+    
+- horizontal scaling
+    
+
+Tradeoff accepted because hackathon scope favors simplicity.
+
+---
+
+## SSE vs WebSocket
+
+Chosen:
+
+```text
+SSE
+```
+
+Reasons:
+
+- one way communication
+    
+- native browser API
+    
+- automatic reconnect
+    
+- minimal state
+    
+
+---
+
+WebSockets provide:
+
+- bidirectional communication
+    
+- lower framing overhead
+    
+
+but complexity was unnecessary.
+
+---
+
+## Docker Compose vs Kubernetes
+
+Chosen:
+
+```text
+Docker Compose
+```
+
+Reasons:
+
+- single command deployment
+    
+- minimal operational burden
+    
+- easier debugging
+    
+
+---
+
+Kubernetes advantages:
+
+- autoscaling
+    
+- rolling deploys
+    
+- service discovery
+    
+- production orchestration
+    
+
+Future migration remains straightforward because services are already isolated.
+
+---
+
+## gRPC vs REST
+
+Chosen:
+
+```text
+REST
+
+for public APIs
+
+gRPC
+
+for internal services
+```
+
+Reasons:
+
+REST:
+
+- browser friendly
+    
+- easy testing
+    
+- file uploads
+    
+
+gRPC:
+
+- strong contracts
+    
+- protobuf schemas
+    
+- streaming
+    
+- lower overhead
+    
+
+---
+
+# Limitations
+
+Current architecture does not provide:
+
+- distributed Redis
+    
+- persistent telemetry queue
+    
+- Kubernetes deployment
+    
+- multi-region benchmarking
+    
+- autoscaling bot fleet
+    
+- Prometheus metrics
+    
+- Grafana dashboards
+    
+
+
