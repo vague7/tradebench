@@ -39,8 +39,8 @@ export function LeaderboardTable({ entries, loading }: LeaderboardTableProps) {
   const prevRef = useRef<Map<string, number>>(new Map());
   const [flashedTeams, setFlashedTeams] = useState<Set<string>>(new Set());
 
-  const qualified = entries.filter((e) => !e.isDisqualified);
-  const failing = entries.filter((e) => e.isDisqualified);
+  const qualified = entries.filter((e) => !e.isDisqualified && e.status !== 'FAILED');
+  const failing = entries.filter((e) => e.isDisqualified || e.status === 'FAILED');
 
   // Flash rows that changed rank
   useEffect(() => {
@@ -167,7 +167,7 @@ export function LeaderboardTable({ entries, loading }: LeaderboardTableProps) {
                     <td className="mono time-cell">{timeAgo(e.updatedAt)}</td>
                     {tab === 'failing' && (
                       <td className="reason-cell">
-                        {normCorrect(e.correctnessScore) < 30 ? 'Correctness < 30%' : 'Disqualified'}
+                        {e.status === 'FAILED' ? 'Build/Runtime Failed' : normCorrect(e.correctnessScore) < 30 ? 'Correctness < 30%' : 'Disqualified'}
                       </td>
                     )}
                   </tr>
