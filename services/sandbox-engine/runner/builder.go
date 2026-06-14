@@ -5,6 +5,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -25,10 +26,22 @@ func NewBuilder() *Builder {
 	return &Builder{docker: cli}
 }
 
+// buildOutput is a single JSON line from the Docker build stream.
+// The daemon sends one JSON object per line; errors appear in the "error" field,
+// build log lines appear in the "stream" field.
+type buildOutput struct {
+	Stream string `json:"stream"`
+	Error  string `json:"error"`
+}
+
 // Build builds a Docker image from the ZIP at zipPath, tagging it imageTag.
 // ctx is used for the Docker build call — pass a context.WithTimeout to enforce
 // the SANDBOX_BUILD_TIMEOUT limit (PRD FR-2).
 func (b *Builder) Build(ctx context.Context, zipPath, imageTag string) error {
+	fmt.Println("===== BUILD CALLED =====")
+	fmt.Println("zipPath:", zipPath)
+	fmt.Println("imageTag:", imageTag)
+
 	if zipPath == "" || imageTag == "" {
 		return fmt.Errorf("builder: zip path and image tag are required")
 	}
@@ -43,16 +56,39 @@ func (b *Builder) Build(ctx context.Context, zipPath, imageTag string) error {
 		Dockerfile: "Dockerfile",
 		Remove:     true,
 	})
+
+	fmt.Println("ImageBuild API call returned, err =", err)
+
 	if err != nil {
 		return fmt.Errorf("builder: image build: %w", err)
 	}
 	defer resp.Body.Close()
 
-	// Drain build output so the daemon releases resources.
-	// Any error lines in the stream surface as a non-nil error here.
-	if _, err := io.Copy(io.Discard, resp.Body); err != nil {
-		return fmt.Errorf("builder: read build output: %w", err)
+	// Parse the build stream line by line.
+	//
+	// IMPORTANT: ImageBuild() returns (response, nil) even when the Dockerfile
+	// build fails — the daemon never sets a non-200 HTTP status for build
+	// errors. Errors are embedded as {"error":"..."} JSON lines in resp.Body.
+	// Draining to io.Discard (the original code) silently swallowed every
+	// failure, making Build() return nil for a build that produced no image.
+	dec := json.NewDecoder(resp.Body)
+	for {
+		var line buildOutput
+		if err := dec.Decode(&line); err != nil {
+			if err == io.EOF {
+				break
+			}
+			return fmt.Errorf("builder: decode build stream: %w", err)
+		}
+		if line.Stream != "" {
+			fmt.Print(line.Stream) // print each "Step N/M ..." line as-is
+		}
+		if line.Error != "" {
+			return fmt.Errorf("builder: docker build failed: %s", line.Error)
+		}
 	}
+
+	fmt.Println("===== BUILD COMPLETE =====")
 	return nil
 }
 

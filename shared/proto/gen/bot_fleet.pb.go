@@ -189,12 +189,12 @@ const file_bot_fleet_proto_rawDesc = "" +
 	"\tbot_count\x18\x03 \x01(\x05R\bbotCount\x12!\n" +
 	"\fduration_sec\x18\x04 \x01(\x05R\vdurationSec\"2\n" +
 	"\vStopRequest\x12#\n" +
-	"\rsubmission_id\x18\x01 \x01(\tR\fsubmissionId\"\x15\n" +
-	"\x03Ack\x12\x0e\n" +
-	"\x02ok\x18\x01 \x01(\bR\x02ok2}\n" +
-	"\bBotFleet\x12:\n" +
-	"\x0eStartBenchmark\x12\x19.botfleet.BenchmarkConfig\x1a\r.botfleet.Ack\x125\n" +
-	"\rStopBenchmark\x12\x15.botfleet.StopRequest\x1a\r.botfleet.AckB#Z!github.com/bench/shared/proto/genb\x06proto3"
+	"\rsubmission_id\x18\x01 \x01(\tR\fsubmissionId\"\x1d\n" +
+	"\vBotFleetAck\x12\x0e\n" +
+	"\x02ok\x18\x01 \x01(\bR\x02ok2\x8d\x01\n" +
+	"\bBotFleet\x12B\n" +
+	"\x0eStartBenchmark\x12\x19.botfleet.BenchmarkConfig\x1a\x15.botfleet.BotFleetAck\x12=\n" +
+	"\rStopBenchmark\x12\x15.botfleet.StopRequest\x1a\x15.botfleet.BotFleetAckB#Z!github.com/bench/shared/proto/genb\x06proto3"
 
 var (
 	file_bot_fleet_proto_rawDescOnce sync.Once
@@ -212,13 +212,13 @@ var file_bot_fleet_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
 var file_bot_fleet_proto_goTypes = []any{
 	(*BenchmarkConfig)(nil), // 0: botfleet.BenchmarkConfig
 	(*StopRequest)(nil),     // 1: botfleet.StopRequest
-	(*BotFleetAck)(nil),             // 2: botfleet.Ack
+	(*BotFleetAck)(nil),     // 2: botfleet.BotFleetAck
 }
 var file_bot_fleet_proto_depIdxs = []int32{
 	0, // 0: botfleet.BotFleet.StartBenchmark:input_type -> botfleet.BenchmarkConfig
 	1, // 1: botfleet.BotFleet.StopBenchmark:input_type -> botfleet.StopRequest
-	2, // 2: botfleet.BotFleet.StartBenchmark:output_type -> botfleet.Ack
-	2, // 3: botfleet.BotFleet.StopBenchmark:output_type -> botfleet.Ack
+	2, // 2: botfleet.BotFleet.StartBenchmark:output_type -> botfleet.BotFleetAck
+	2, // 3: botfleet.BotFleet.StopBenchmark:output_type -> botfleet.BotFleetAck
 	2, // [2:4] is the sub-list for method output_type
 	0, // [0:2] is the sub-list for method input_type
 	0, // [0:0] is the sub-list for extension type_name

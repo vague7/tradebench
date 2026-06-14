@@ -255,11 +255,11 @@ const file_telemetry_proto_rawDesc = "" +
 	"httpStatus\x124\n" +
 	"\rexpected_fill\x18\b \x01(\v2\x0f.telemetry.FillR\fexpectedFill\x120\n" +
 	"\vactual_fill\x18\t \x01(\v2\x0f.telemetry.FillR\n" +
-	"actualFill\"\x15\n" +
-	"\x03Ack\x12\x0e\n" +
-	"\x02ok\x18\x01 \x01(\bR\x02ok2O\n" +
-	"\x11TelemetryIngester\x12:\n" +
-	"\fStreamEvents\x12\x18.telemetry.BotEventProto\x1a\x0e.telemetry.Ack(\x01B#Z!github.com/bench/shared/proto/genb\x06proto3"
+	"actualFill\"\x1e\n" +
+	"\fTelemetryAck\x12\x0e\n" +
+	"\x02ok\x18\x01 \x01(\bR\x02ok2X\n" +
+	"\x11TelemetryIngester\x12C\n" +
+	"\fStreamEvents\x12\x18.telemetry.BotEventProto\x1a\x17.telemetry.TelemetryAck(\x01B#Z!github.com/bench/shared/proto/genb\x06proto3"
 
 var (
 	file_telemetry_proto_rawDescOnce sync.Once
@@ -277,7 +277,7 @@ var file_telemetry_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
 var file_telemetry_proto_goTypes = []any{
 	(*Fill)(nil),                  // 0: telemetry.Fill
 	(*BotEventProto)(nil),         // 1: telemetry.BotEventProto
-	(*TelemetryAck)(nil),          // 2: telemetry.Ack
+	(*TelemetryAck)(nil),          // 2: telemetry.TelemetryAck
 	(*timestamppb.Timestamp)(nil), // 3: google.protobuf.Timestamp
 }
 var file_telemetry_proto_depIdxs = []int32{
@@ -286,7 +286,7 @@ var file_telemetry_proto_depIdxs = []int32{
 	0, // 2: telemetry.BotEventProto.expected_fill:type_name -> telemetry.Fill
 	0, // 3: telemetry.BotEventProto.actual_fill:type_name -> telemetry.Fill
 	1, // 4: telemetry.TelemetryIngester.StreamEvents:input_type -> telemetry.BotEventProto
-	2, // 5: telemetry.TelemetryIngester.StreamEvents:output_type -> telemetry.Ack
+	2, // 5: telemetry.TelemetryIngester.StreamEvents:output_type -> telemetry.TelemetryAck
 	5, // [5:6] is the sub-list for method output_type
 	4, // [4:5] is the sub-list for method input_type
 	4, // [4:4] is the sub-list for extension type_name

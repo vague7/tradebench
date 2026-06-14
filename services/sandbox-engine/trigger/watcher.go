@@ -19,7 +19,7 @@ const (
 	readyKeyPrefix    = "submission:"
 	readyKeySuffix    = ":ready"
 	pollInterval      = 2 * time.Second
-	botFleetAddr      = "bot-fleet:9002"
+	botFleetAddr      = "dns:///bot-fleet:9002"
 	benchmarkBotCount = 10000
 	benchmarkDuration = 270 // warm-up+ramp+sustained+spike+drain = 30+60+120+30+30
 )

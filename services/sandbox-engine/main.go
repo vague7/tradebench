@@ -38,12 +38,17 @@ func main() {
 
 	builder := runner.NewBuilder()
 	spawner := runner.NewSpawner(cfg.BenchNetName)
-	healthChecker := runner.NewHealthChecker(time.Duration(cfg.SandboxHealthTimeout) * time.Second)
+	// Pass BenchNetName so the health checker reaches submission containers via
+	// their bench-net IP, not via 127.0.0.1 (which is unreachable inside Docker).
+	healthChecker := runner.NewHealthChecker(
+		time.Duration(cfg.SandboxHealthTimeout)*time.Second,
+		cfg.BenchNetName,
+	)
 	watchdog := runner.NewWatchdog(time.Duration(cfg.SandboxContainerTTL) * time.Second)
 	registry := runner.NewRegistry()
 	db := runner.NewPostgresStatusUpdater(os.Getenv("POSTGRES_DSN"))
 
-	// ── Watchdog: kill containers past TTL ───────────────────────────────────
+	// ── Watchdog ─────────────────────────────────────────────────────────────
 	go func() {
 		ticker := time.NewTicker(10 * time.Second)
 		defer ticker.Stop()
@@ -54,10 +59,7 @@ func main() {
 			case now := <-ticker.C:
 				for subID, entry := range registry.Snapshot() {
 					if watchdog.ShouldKill(entry.StartedAt, now) {
-						slog.Info("watchdog: TTL exceeded, killing container",
-							"submissionId", subID,
-							"containerID", entry.ContainerID,
-						)
+						slog.Info("watchdog: TTL exceeded, killing", "submissionId", subID)
 						if err := healthChecker.KillAndRemove(entry.ContainerID); err != nil {
 							slog.Error("watchdog: kill failed", "containerID", entry.ContainerID, "err", err)
 						}
@@ -74,33 +76,25 @@ func main() {
 	if err != nil {
 		log.Fatalf("FATAL: sandbox gRPC listen on %s failed: %v", sandboxGRPCPort, err)
 	}
-
 	grpcServer := grpc.NewServer()
-	sandboxSrv := sbgrpc.NewSandboxServer(registry, db, healthChecker)
-	gen.RegisterSandboxEngineServer(grpcServer, sandboxSrv)
-
+	gen.RegisterSandboxEngineServer(grpcServer, sbgrpc.NewSandboxServer(registry, db, healthChecker))
 	go func() {
 		slog.Info("sandbox-engine gRPC server listening", "port", sandboxGRPCPort)
 		if err := grpcServer.Serve(lis); err != nil {
 			slog.Error("sandbox gRPC server error", "err", err)
 		}
 	}()
+	go func() { <-ctx.Done(); grpcServer.GracefulStop() }()
 
-	// Graceful gRPC shutdown on signal.
-	go func() {
-		<-ctx.Done()
-		grpcServer.GracefulStop()
-	}()
-
-	// ── Trigger watcher: poll Redis :ready keys → call BotFleet.StartBenchmark
-	w := trigger.NewWatcher(rdb)
+	// ── Trigger watcher ───────────────────────────────────────────────────────
 	go func() {
 		slog.Info("trigger watcher starting")
-		w.Run(ctx)
+		trigger.NewWatcher(rdb).Run(ctx)
 	}()
 
-	// ── Redis stream consumer (blocking main goroutine) ───────────────────────
-	consumer := queue.NewConsumer(rdb, builder, spawner, healthChecker, db, registry, cfg.SandboxMaxConcurrent, cfg.SandboxBuildTimeout)
+	// ── Redis stream consumer ─────────────────────────────────────────────────
+	consumer := queue.NewConsumer(rdb, builder, spawner, healthChecker, db, registry,
+		cfg.SandboxMaxConcurrent, cfg.SandboxBuildTimeout)
 
 	slog.Info("sandbox-engine starting",
 		"benchNetName", cfg.BenchNetName,

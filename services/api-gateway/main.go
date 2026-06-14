@@ -51,6 +51,13 @@ func main() {
 	go watcher.Run(ctx)
 
 	mux := http.NewServeMux()
+
+	mux.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"status":"ok"}`))
+	})
+
 	handlers.NewSubmissionHandler(cfg, postgresStore, redisClient).Register(mux)
 	handlers.NewLeaderboardHandler(cfg, postgresStore, redisClient).Register(mux)
 	handlers.NewAdminHandler(cfg, postgresStore, redisClient).Register(mux)
