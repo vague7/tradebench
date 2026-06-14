@@ -8,8 +8,7 @@ on:
 
 jobs:
   # ─────────────────────────────────────────────────────────────
-  # Job 1: Unit tests — fast, no Docker needed
-  # Runs from repo root so go.work resolves all modules.
+  # Job 1: Unit tests
   # ─────────────────────────────────────────────────────────────
   unit-tests:
     name: Unit Tests
@@ -26,28 +25,36 @@ jobs:
           cache-dependency-path: go.work.sum
 
       - name: api-gateway — middleware
-        run: go test ./services/api-gateway/middleware/... -v -count=1
+        run: go test ./middleware/... -v -count=1
+        working-directory: services/api-gateway
 
       - name: api-gateway — handlers
-        run: go test ./services/api-gateway/handlers/... -v -count=1
+        run: go test ./handlers/... -v -count=1
+        working-directory: services/api-gateway
 
       - name: sandbox-engine — queue
-        run: go test ./services/sandbox-engine/queue/... -v -count=1
+        run: go test ./queue/... -v -count=1
+        working-directory: services/sandbox-engine
 
       - name: bot-fleet — generator
-        run: go test ./services/bot-fleet/bot/... -v -count=1
+        run: go test ./bot/... -v -count=1
+        working-directory: services/bot-fleet
 
       - name: telemetry-ingester — scoring
-        run: go test ./services/telemetry-ingester/scoring/... -v -count=1
+        run: go test ./scoring/... -v -count=1
+        working-directory: services/telemetry-ingester
 
       - name: telemetry-ingester — aggregate
-        run: go test ./services/telemetry-ingester/aggregate/... -v -count=1
+        run: go test ./aggregate/... -v -count=1
+        working-directory: services/telemetry-ingester
 
       - name: telemetry-ingester — correctness
-        run: go test ./services/telemetry-ingester/correctness/... -v -count=1
+        run: go test ./correctness/... -v -count=1
+        working-directory: services/telemetry-ingester
 
   # ─────────────────────────────────────────────────────────────
-  # Job 2: Compile check — all services must build cleanly
+  # Job 2: Compile check — each module built individually
+  # go.work modules cannot be globbed via ./services/...
   # ─────────────────────────────────────────────────────────────
   build:
     name: Build Services
@@ -63,13 +70,24 @@ jobs:
           go-version: '1.23'
           cache-dependency-path: go.work.sum
 
-      - name: Build all services via workspace
-        run: go build ./services/...
+      - name: Build api-gateway
+        run: go build ./...
+        working-directory: services/api-gateway
+
+      - name: Build sandbox-engine
+        run: go build ./...
+        working-directory: services/sandbox-engine
+
+      - name: Build bot-fleet
+        run: go build ./...
+        working-directory: services/bot-fleet
+
+      - name: Build telemetry-ingester
+        run: go build ./...
+        working-directory: services/telemetry-ingester
 
   # ─────────────────────────────────────────────────────────────
   # Job 3: Docker image builds
-  # Uses GHA layer cache — fast after first run.
-  # Only runs on push to main.
   # ─────────────────────────────────────────────────────────────
   docker-build:
     name: Docker Builds
@@ -125,10 +143,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=telemetry-ingester
 
   # ─────────────────────────────────────────────────────────────
-  # Job 4: E2E test — full platform smoke test
-  # Benchmark phases: 20+30+60+20+20 = 150s total
-  # Timeout set to 300s to give 2x headroom.
-  # Only runs on push to main.
+  # Job 4: E2E test
   # ─────────────────────────────────────────────────────────────
   e2e:
     name: E2E Test
@@ -144,8 +159,6 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Create .env for CI
-        # Mirrors production .env exactly. BOT_SUSTAINED_COUNT reduced to 200
-        # to stay within GitHub runner memory (7GB RAM).
         run: |
           cat > .env << 'ENVEOF'
           POSTGRES_DSN=postgres://bench:bench@postgres:5432/bench
@@ -176,7 +189,7 @@ jobs:
           TELEMETRY_GRPC_ADDR=telemetry-ingester:9003
           ENVEOF
 
-      - name: Build services (sequential — prevents OOM on runner)
+      - name: Build services (sequential — prevents OOM)
         run: |
           docker compose build api-gateway
           docker compose build sandbox-engine
@@ -187,7 +200,7 @@ jobs:
       - name: Start platform
         run: docker compose up -d
 
-      - name: Wait for migrator to complete
+      - name: Wait for migrator
         run: |
           echo "Waiting for migrator..."
           for i in $(seq 1 30); do
@@ -209,7 +222,6 @@ jobs:
 
       - name: Wait for api-gateway
         run: |
-          echo "Waiting for api-gateway..."
           for i in $(seq 1 30); do
             if curl -sf http://localhost:8080/api/leaderboard > /dev/null 2>&1; then
               echo "api-gateway ready."
@@ -219,30 +231,29 @@ jobs:
             sleep 3
           done
 
-      - name: Patch E2E timeout for CI
-        # Benchmark is 150s total (20+30+60+20+20). 300s gives 2x headroom.
+      - name: Patch E2E timeout
+        # Benchmark phases: 20+30+60+20+20 = 150s. 300s = 2x headroom.
         run: sed -i 's/TIMEOUT=.*/TIMEOUT=300/' scripts/test_e2e.sh
 
       - name: Run E2E test
         run: make test-e2e
 
-      - name: Print service logs on failure
+      - name: Print logs on failure
         if: failure()
         run: |
-          echo "======= api-gateway ======="
+          echo "=== api-gateway ==="
           docker compose logs api-gateway --tail=80
-          echo "======= sandbox-engine ======="
+          echo "=== sandbox-engine ==="
           docker compose logs sandbox-engine --tail=80
-          echo "======= bot-fleet ======="
+          echo "=== bot-fleet ==="
           docker compose logs bot-fleet --tail=80
-          echo "======= telemetry-ingester ======="
+          echo "=== telemetry-ingester ==="
           docker compose logs telemetry-ingester --tail=80
-          echo "======= migrator ======="
+          echo "=== migrator ==="
           docker compose logs migrator
-          echo "======= postgres ======="
+          echo "=== postgres ==="
           docker compose logs postgres --tail=30
 
       - name: Tear down
         if: always()
-        # make down already kills submission containers + removes volumes
         run: make down
