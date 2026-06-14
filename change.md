@@ -16,4 +16,6 @@
 *   **Detail**: Moved the `RUN npm install` layer above the `COPY src ./src` and `COPY public ./public` layers. This prevents Docker from busting the entire `npm install` cache whenever a React source file is modified, reducing rebuild times from 5+ minutes to mere seconds.
 
 ## 4. Test Submissions Added
-*   **Detail**: Created `test2_submission` and `failed_submission` directories (and corresponding zip archives) for testing end-to-end functionality of passing and intentionally broken Go servers under extreme load.
+*   **Detail**: Created two mock submissions for testing the platform:
+    *   **Passing Mock**: Source files in `test2_submission/` folder, zipped as `test2.zip` (located in the root `tradebench` directory). This is a fast, properly formatted server for testing the 10,000 bot load.
+    *   **Failing Mock**: Source files in `failed_submission/` folder, zipped as `failed.zip` (located in the root `tradebench` directory). This contains an intentional unused import error to test the Failing tab logic on the leaderboard.
