@@ -15,7 +15,7 @@ import (
 
 // EmitChannelCap is the buffer capacity for the internal channel between bots and
 // the streamer. Matches the telemetry-ingester's ring buffer capacity (FR-4.2).
-const EmitChannelCap = 10_000
+const EmitChannelCap = 100_000
 
 // maxRetries is the number of times to retry stream.Send on failure.
 const maxRetries = 3

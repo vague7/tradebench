@@ -300,7 +300,7 @@ type SubmissionRecord struct {
 	ID             string
 	TeamName       string
 	Status         benchtypes.SubmissionStatus
-	ErrorMessage   string
+	ErrorMessage   *string
 	UploadedAt     time.Time
 	BenchmarkStart *time.Time
 	BenchmarkEnd   *time.Time

@@ -13,6 +13,8 @@ volumes:
 
 services:
   postgres:
+    ports:
+      - "5432:5432"
     image: timescale/timescaledb:latest-pg15
     networks:
       - platform-net
@@ -23,9 +25,39 @@ services:
       POSTGRES_USER: bench
       POSTGRES_PASSWORD: bench
     healthcheck:
-      test: ["CMD", "pg_isready", "-U", "bench"]
-      interval: 5s
-      retries: 10
+      test: ["CMD-SHELL", "pg_isready -U bench -d bench"]
+      interval: 2s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+
+  migrator:
+    image: timescale/timescaledb:latest-pg15
+    networks:
+      - platform-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: bench
+    volumes:
+      - ./migrations:/migrations
+    entrypoint:
+      - sh
+      - -c
+      - |
+        echo 'Waiting for postgres to be fully ready...'
+        sleep 10
+        until psql -h postgres -U bench -d bench -c '\q' 2>/dev/null; do
+          echo 'retrying...'
+          sleep 3
+        done
+        echo 'Running migrations...'
+        psql -h postgres -U bench -d bench -f /migrations/001_initial_schema.sql || exit 1
+        psql -h postgres -U bench -d bench -f /migrations/002_indexes.sql || exit 1
+        psql -h postgres -U bench -d bench -f /migrations/003_scores_team_name.sql || exit 1
+        echo 'Migrations complete.'
+    restart: "no"
 
   redis:
     image: redis:7-alpine
@@ -43,8 +75,8 @@ services:
     ports:
       - "8080:8080"
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrator:
+        condition: service_completed_successfully
       redis:
         condition: service_started
     volumes:
@@ -54,19 +86,23 @@ services:
       - .env
 
   sandbox-engine:
+    user: root
     build:
       context: .
       dockerfile: ./services/sandbox-engine/Dockerfile
     networks:
       - platform-net
+      - bench-net
     volumes:
       - submissions-data:/data/submissions
       - /var/run/docker.sock:/var/run/docker.sock
     env_file:
       - .env
     depends_on:
-      - redis
-      - postgres
+      migrator:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
 
   bot-fleet:
     build:
@@ -89,8 +125,8 @@ services:
     env_file:
       - .env
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrator:
+        condition: service_completed_successfully
 
   frontend:
     build:

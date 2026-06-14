@@ -4,7 +4,7 @@ import (
 	"github.com/bench/shared/types"
 )
 
-const ringBufferCapacity = 10_000
+const ringBufferCapacity = 100_000
 
 // RingBuffer is a fixed-capacity, goroutine-safe in-memory buffer for BotEvents.
 // It is backed by a buffered channel, providing lock-free push/pop with

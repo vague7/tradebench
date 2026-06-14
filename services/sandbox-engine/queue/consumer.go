@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/bench/sandbox-engine/runner"
@@ -19,6 +20,10 @@ const (
 	// Redis key TTLs (PRD Section 4.4)
 	statusKeyTTL = time.Hour
 	readyKeyTTL  = 10 * time.Minute
+
+	// pelMinIdle is how long a message must sit unacked in the PEL before this
+	// consumer instance reclaims it from a previous (now-dead) instance.
+	pelMinIdle = 30 * time.Second
 )
 
 // StatusUpdater is the interface the consumer uses to update submission state.
@@ -69,11 +74,66 @@ func NewConsumer(
 	}
 }
 
-func (c *Consumer) Run(ctx context.Context) error {
-	err := c.rdb.XGroupCreateMkStream(ctx, jobStreamKey, consumerGroup, "0").Err()
-	if err != nil && err.Error() != "BUSYGROUP Consumer Group name already exists" {
+// ensureGroup creates the consumer group if it does not exist.
+//
+// The original code used start ID "0", which means "replay all messages from
+// the beginning of the stream". That is dangerous: if the stream has history
+// from a previous run, every message is re-delivered on startup.
+//
+// We use "$" so a freshly-created group only sees messages that arrive after
+// it is created — the standard production default.
+//
+// If the group already exists the BUSYGROUP error is swallowed; the existing
+// last-delivered-ID is unchanged, which is what we want.
+func (c *Consumer) ensureGroup(ctx context.Context) error {
+	err := c.rdb.XGroupCreateMkStream(ctx, jobStreamKey, consumerGroup, "$").Err()
+	if err != nil && !strings.Contains(err.Error(), "BUSYGROUP") {
 		return fmt.Errorf("consumer: create group: %w", err)
 	}
+	return nil
+}
+
+// reclaimPEL reclaims messages that have been sitting in the Pending Entry
+// List for longer than pelMinIdle. This covers the case where a previous
+// sandbox-engine instance crashed after receiving a message but before ACKing
+// it. Without this loop those messages would be stuck in the PEL forever
+// because XReadGroup with ">" only delivers *new* messages.
+func (c *Consumer) reclaimPEL(ctx context.Context) {
+	for {
+		res, _, err := c.rdb.XAutoClaim(ctx, &redis.XAutoClaimArgs{
+			Stream:   jobStreamKey,
+			Group:    consumerGroup,
+			Consumer: consumerName,
+			MinIdle:  pelMinIdle,
+			Start:    "0-0",
+			Count:    10,
+		}).Result()
+		if err != nil {
+			// NOGROUP can appear here on the very first startup before the
+			// group exists; ensureGroup is called first so this should not
+			// happen, but guard anyway.
+			slog.Error("consumer: xautoclaim error", "err", err)
+			return
+		}
+		if len(res) == 0 {
+			return // PEL is empty or all entries are too fresh
+		}
+		slog.Info("consumer: reclaiming stale PEL messages", "count", len(res))
+		for _, msg := range res {
+			c.dispatch(ctx, msg)
+		}
+	}
+}
+
+// Run is the main loop. It blocks until ctx is cancelled.
+func (c *Consumer) Run(ctx context.Context) error {
+	// ensureGroup is idempotent: safe to call every startup.
+	if err := c.ensureGroup(ctx); err != nil {
+		return err
+	}
+
+	// Reclaim any messages that were left unacked by a previous instance.
+	c.reclaimPEL(ctx)
 
 	slog.Info("consumer: listening",
 		"stream", jobStreamKey,
@@ -98,10 +158,21 @@ func (c *Consumer) Run(ctx context.Context) error {
 		}).Result()
 		if err != nil {
 			if err == redis.Nil {
-				continue
+				continue // block timeout, no new messages — normal
 			}
 			if ctx.Err() != nil {
 				return ctx.Err()
+			}
+			// NOGROUP means the stream or group was deleted out from under us
+			// (e.g. someone ran DEL stream:jobs or XGROUP DESTROY in Redis).
+			// Re-create the group and keep going rather than crashing.
+			if strings.Contains(err.Error(), "NOGROUP") {
+				slog.Warn("consumer: group missing, recreating", "err", err)
+				if recreateErr := c.ensureGroup(ctx); recreateErr != nil {
+					slog.Error("consumer: failed to recreate group", "err", recreateErr)
+				}
+				time.Sleep(time.Second)
+				continue
 			}
 			slog.Error("consumer: xreadgroup error", "err", err)
 			time.Sleep(time.Second)
@@ -110,25 +181,32 @@ func (c *Consumer) Run(ctx context.Context) error {
 
 		for _, stream := range streams {
 			for _, msg := range stream.Messages {
-				// Acquire concurrency slot — blocks if at capacity.
-				select {
-				case c.sem <- struct{}{}:
-				case <-ctx.Done():
-					return ctx.Err()
-				}
-
-				go func(m redis.XMessage) {
-					defer func() { <-c.sem }()
-
-					if err := c.process(ctx, m); err != nil {
-						slog.Error("consumer: process failed", "msgId", m.ID, "err", err)
-						return // leave in PEL for redelivery
-					}
-					_ = c.rdb.XAck(ctx, jobStreamKey, consumerGroup, m.ID).Err()
-				}(msg)
+				c.dispatch(ctx, msg)
 			}
 		}
 	}
+}
+
+// dispatch acquires a concurrency slot and processes msg in a goroutine.
+func (c *Consumer) dispatch(ctx context.Context, msg redis.XMessage) {
+	// Acquire concurrency slot — blocks if at capacity.
+	select {
+	case c.sem <- struct{}{}:
+	case <-ctx.Done():
+		return
+	}
+
+	go func(m redis.XMessage) {
+		defer func() { <-c.sem }()
+
+		if err := c.process(ctx, m); err != nil {
+			slog.Error("consumer: process failed", "msgId", m.ID, "err", err)
+			return // leave in PEL; reclaimPEL will pick it up on next restart
+		}
+		if err := c.rdb.XAck(ctx, jobStreamKey, consumerGroup, m.ID).Err(); err != nil {
+			slog.Error("consumer: xack failed", "msgId", m.ID, "err", err)
+		}
+	}(msg)
 }
 
 func (c *Consumer) process(ctx context.Context, msg redis.XMessage) error {

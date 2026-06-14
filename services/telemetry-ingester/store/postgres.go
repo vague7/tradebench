@@ -63,12 +63,22 @@ func (s *PostgresStore) InsertMetricSnapshot(ctx context.Context, snap types.Met
 // InsertScore inserts a single Score row into the scores table.
 func (s *PostgresStore) InsertScore(ctx context.Context, score types.Score) error {
 	const query = `INSERT INTO scores
-		(submission_id, throughput_score, latency_score, correctness_score,
+		(submission_id, team_name, throughput_score, latency_score, correctness_score,
 		 final_score, is_disqualified, disqualify_reason, computed_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+		ON CONFLICT (submission_id) DO UPDATE SET
+		  team_name         = EXCLUDED.team_name,
+		  throughput_score  = EXCLUDED.throughput_score,
+		  latency_score     = EXCLUDED.latency_score,
+		  correctness_score = EXCLUDED.correctness_score,
+		  final_score       = EXCLUDED.final_score,
+		  is_disqualified   = EXCLUDED.is_disqualified,
+		  disqualify_reason = EXCLUDED.disqualify_reason,
+		  computed_at       = EXCLUDED.computed_at`
 
 	_, err := s.db.ExecContext(ctx, query,
 		score.SubmissionID,
+		score.TeamName,
 		score.ThroughputScore,
 		score.LatencyScore,
 		score.CorrectnessScore,
@@ -80,7 +90,6 @@ func (s *PostgresStore) InsertScore(ctx context.Context, score types.Score) erro
 	if err != nil {
 		return fmt.Errorf("store: InsertScore for submission %s: %w", score.SubmissionID, err)
 	}
-
 	return nil
 }
 

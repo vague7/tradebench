@@ -8,3 +8,19 @@ dist/
 *.out
 .DS_Store
 *.zip
+# Compiled binaries
+services/api-gateway/api-gateway
+services/bot-fleet/bot-fleet
+services/sandbox-engine/sandbox-engine
+services/telemetry-ingester/telemetry-ingester
+scripts/test_submission/test-sub
+ 
+# Environment (keep .env.example, ignore .env)
+.env
+ 
+# Test artifacts
+scripts/test_sub.zip
+ 
+# OS
+.DS_Store
+*.swp

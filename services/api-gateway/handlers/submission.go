@@ -225,11 +225,14 @@ func (h *SubmissionHandler) handleGetStatus(w http.ResponseWriter, r *http.Reque
 	}
 
 	resp := submissionStatusResponse{
-		ID:           record.ID,
-		TeamName:     record.TeamName,
-		Status:       string(record.Status),
-		ErrorMessage: record.ErrorMessage,
-		UploadedAt:   record.UploadedAt.UTC().Format(time.RFC3339Nano),
+		ID:         record.ID,
+		TeamName:   record.TeamName,
+		Status:     string(record.Status),
+		UploadedAt: record.UploadedAt.UTC().Format(time.RFC3339Nano),
+	}
+
+	if record.ErrorMessage != nil {
+		resp.ErrorMessage = *record.ErrorMessage
 	}
 	if record.BenchmarkStart != nil {
 		resp.BenchmarkStart = record.BenchmarkStart.UTC().Format(time.RFC3339Nano)

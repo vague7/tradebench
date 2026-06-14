@@ -4,10 +4,11 @@ COPY go.work go.work.sum ./
 COPY shared/ ./shared/
 COPY services/ ./services/
 WORKDIR /app/services/bot-fleet
-RUN go build -o /bin/service .
+RUN go build -ldflags="-s -w" -trimpath -o /bin/service .
 
 FROM alpine:3.19
 RUN adduser -D -u 1001 appuser
 COPY --from=builder /bin/service /bin/service
 USER appuser
+EXPOSE 9002
 ENTRYPOINT ["/bin/service"]

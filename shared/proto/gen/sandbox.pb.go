@@ -234,12 +234,13 @@ const file_sandbox_proto_rawDesc = "" +
 	"\rsubmission_id\x18\x01 \x01(\tR\fsubmissionId\x12\x16\n" +
 	"\x06status\x18\x02 \x01(\tR\x06status\x12!\n" +
 	"\fcontainer_id\x18\x03 \x01(\tR\vcontainerId\x12#\n" +
-	"\rerror_message\x18\x04 \x01(\tR\ferrorMessage\"\x15\n" +
-	"\x03Ack\x12\x0e\n" +
-	"\x02ok\x18\x01 \x01(\bR\x02ok2\x82\x01\n" +
+	"\rerror_message\x18\x04 \x01(\tR\ferrorMessage\"\x1c\n" +
+	"\n" +
+	"SandboxAck\x12\x0e\n" +
+	"\x02ok\x18\x01 \x01(\bR\x02ok2\x89\x01\n" +
 	"\rSandboxEngine\x12<\n" +
-	"\tGetStatus\x12\x16.sandbox.StatusRequest\x1a\x17.sandbox.StatusResponse\x123\n" +
-	"\rKillContainer\x12\x14.sandbox.KillRequest\x1a\f.sandbox.AckB#Z!github.com/bench/shared/proto/genb\x06proto3"
+	"\tGetStatus\x12\x16.sandbox.StatusRequest\x1a\x17.sandbox.StatusResponse\x12:\n" +
+	"\rKillContainer\x12\x14.sandbox.KillRequest\x1a\x13.sandbox.SandboxAckB#Z!github.com/bench/shared/proto/genb\x06proto3"
 
 var (
 	file_sandbox_proto_rawDescOnce sync.Once
@@ -258,13 +259,13 @@ var file_sandbox_proto_goTypes = []any{
 	(*StatusRequest)(nil),  // 0: sandbox.StatusRequest
 	(*KillRequest)(nil),    // 1: sandbox.KillRequest
 	(*StatusResponse)(nil), // 2: sandbox.StatusResponse
-	(*SandboxAck)(nil),            // 3: sandbox.Ack
+	(*SandboxAck)(nil),     // 3: sandbox.SandboxAck
 }
 var file_sandbox_proto_depIdxs = []int32{
 	0, // 0: sandbox.SandboxEngine.GetStatus:input_type -> sandbox.StatusRequest
 	1, // 1: sandbox.SandboxEngine.KillContainer:input_type -> sandbox.KillRequest
 	2, // 2: sandbox.SandboxEngine.GetStatus:output_type -> sandbox.StatusResponse
-	3, // 3: sandbox.SandboxEngine.KillContainer:output_type -> sandbox.Ack
+	3, // 3: sandbox.SandboxEngine.KillContainer:output_type -> sandbox.SandboxAck
 	2, // [2:4] is the sub-list for method output_type
 	0, // [0:2] is the sub-list for method input_type
 	0, // [0:0] is the sub-list for extension type_name

@@ -73,7 +73,7 @@ func (wm *WindowManager) Run(ctx context.Context) {
 
 // ringBufferDrainSize is the maximum number of events to drain per tick.
 // Set higher than the buffer capacity to ensure we drain everything available.
-const ringBufferDrainSize = 20_000
+const ringBufferDrainSize = 200_000
 
 // computeAndPersist computes latency percentiles, TPS, and success/failure/timeout counts,
 // then persists a MetricSnapshot to the database and triggers scoring.

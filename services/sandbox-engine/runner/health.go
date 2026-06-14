@@ -12,18 +12,22 @@ import (
 )
 
 type HealthChecker struct {
-	Timeout time.Duration
-	docker  *client.Client
+	Timeout      time.Duration
+	BenchNetName string
+	docker       *client.Client
 }
 
-func NewHealthChecker(timeout time.Duration) *HealthChecker {
+func NewHealthChecker(timeout time.Duration, benchNetName string) *HealthChecker {
 	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
 		panic(fmt.Sprintf("healthchecker: docker client init failed: %v", err))
 	}
-	return &HealthChecker{Timeout: timeout, docker: cli}
+	return &HealthChecker{Timeout: timeout, BenchNetName: benchNetName, docker: cli}
 }
 
+// WaitReady polls the container's /health endpoint until it returns 200 or the
+// timeout expires. It reaches the container via its IP on bench-net directly,
+// which is reachable from sandbox-engine when sandbox-engine is also on bench-net.
 func (h *HealthChecker) WaitReady(ctx context.Context, containerID string) error {
 	if containerID == "" {
 		return fmt.Errorf("healthchecker: empty container ID")
@@ -46,18 +50,22 @@ func (h *HealthChecker) WaitReady(ctx context.Context, containerID string) error
 			return fmt.Errorf("healthchecker: timed out waiting for container %s", containerID)
 		}
 
-		// Inspect to get port binding.
 		info, err := h.docker.ContainerInspect(ctx, containerID)
 		if err != nil {
 			continue
 		}
-		bindings, ok := info.NetworkSettings.Ports["8080/tcp"]
-		if !ok || len(bindings) == 0 {
+
+		// Prefer direct container IP on bench-net (sandbox-engine is also on bench-net).
+		ip := containerIPOnNetwork(info, h.BenchNetName)
+		if ip == "" {
+			// Fallback: any IP Docker assigned.
+			ip = info.NetworkSettings.IPAddress
+		}
+		if ip == "" {
 			continue
 		}
-		hostPort := bindings[0].HostPort
-		url := fmt.Sprintf("http://127.0.0.1:%s/health", hostPort)
 
+		url := fmt.Sprintf("http://%s:8080/health", ip)
 		resp, err := httpClient.Get(url)
 		if err != nil {
 			continue
@@ -69,7 +77,18 @@ func (h *HealthChecker) WaitReady(ctx context.Context, containerID string) error
 	}
 }
 
-// KillAndRemove stops and removes a container (used by the watchdog).
+// containerIPOnNetwork returns the container's IP on the named Docker network.
+func containerIPOnNetwork(info types.ContainerJSON, networkName string) string {
+	if info.NetworkSettings == nil {
+		return ""
+	}
+	if ep, ok := info.NetworkSettings.Networks[networkName]; ok && ep != nil {
+		return ep.IPAddress
+	}
+	return ""
+}
+
+// KillAndRemove stops and removes a container (used by watchdog and gRPC KillContainer).
 func (h *HealthChecker) KillAndRemove(containerID string) error {
 	ctx := context.Background()
 	timeout := 10
