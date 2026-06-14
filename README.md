@@ -6,7 +6,7 @@
 ![Postgres](https://img.shields.io/badge/Postgres-TimescaleDB-336791?logo=postgresql)  
 ![Redis](https://img.shields.io/badge/Redis-Streams-DC382D?logo=redis)  
 ![License](https://img.shields.io/badge/license-MIT-green)
-
+![CI](https://github.com/sumitbhuia/tradebench/actions/workflows/ci.yml/badge.svg)
 
 **Distributed Benchmarking Platform for Trading Exchange Engines**
 
@@ -579,21 +579,25 @@ SCORED
 
 ### Submission Page
 
-```text
-[ Screenshot Placeholder ]
-```
+<img width="1440" height="826" alt="Screenshot 2026-06-14 at 8 34 54 PM" src="https://github.com/user-attachments/assets/2f3a9ac4-1fe5-4ac3-b86a-99b237e3aa1a" />
+
+
+<img width="1440" height="900" alt="Screenshot 2026-06-14 at 8 36 00 PM" src="https://github.com/user-attachments/assets/5fc939d1-b535-462b-a402-d29c8fdcd5cb" />
+
+<img width="1440" height="818" alt="Screenshot 2026-06-14 at 8 36 20 PM" src="https://github.com/user-attachments/assets/f832c485-32af-4294-acc8-5fec894ef072" />
+
+
+<img width="1437" height="823" alt="Screenshot 2026-06-14 at 8 36 35 PM" src="https://github.com/user-attachments/assets/9781952d-b224-4dbd-8003-58649e2f6f7d" />
+
+
+
 
 ### Live Leaderboard
 
-```text
-[ Screenshot Placeholder ]
-```
+<img width="1440" height="824" alt="Screenshot 2026-06-14 at 8 48 22 PM" src="https://github.com/user-attachments/assets/eb5f873f-c533-495a-8ea8-c511d6227575" />
 
-### Benchmark Pipeline
+<img width="1440" height="820" alt="Screenshot 2026-06-14 at 8 47 59 PM" src="https://github.com/user-attachments/assets/d1ca6659-2088-47b6-90b1-a465f1ffe17f" />
 
-```text
-[ Screenshot Placeholder ]
-```
 
 ---
 
@@ -624,21 +628,9 @@ Built for:
 
 **IICPC Summer Hackathon 2026**
 
-Contributors:
-
-- Backend Engineering
-    
-- Distributed Systems Engineering
-    
-- Frontend Engineering
-    
-
 ---
 
 ## License
 
 MIT License
 
-Use it responsibly.
-
-The containers won't.
