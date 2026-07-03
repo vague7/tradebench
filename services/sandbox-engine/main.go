@@ -17,7 +17,6 @@ import (
 	sbgrpc "github.com/bench/sandbox-engine/grpc"
 	"github.com/bench/sandbox-engine/queue"
 	"github.com/bench/sandbox-engine/runner"
-	"github.com/bench/sandbox-engine/trigger"
 	gen "github.com/bench/shared/proto/gen"
 )
 
@@ -85,12 +84,6 @@ func main() {
 		}
 	}()
 	go func() { <-ctx.Done(); grpcServer.GracefulStop() }()
-
-	// ── Trigger watcher ───────────────────────────────────────────────────────
-	go func() {
-		slog.Info("trigger watcher starting")
-		trigger.NewWatcher(rdb).Run(ctx)
-	}()
 
 	// ── Redis stream consumer ─────────────────────────────────────────────────
 	consumer := queue.NewConsumer(rdb, builder, spawner, healthChecker, db, registry,
