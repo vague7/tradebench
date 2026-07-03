@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/bench/bot-fleet/config"
 	"github.com/bench/bot-fleet/emit"
@@ -77,8 +78,44 @@ func (s *BotFleetServer) StartBenchmark(ctx context.Context, req *gen.BenchmarkC
 	streamerDone := make(chan struct{})
 	go func() {
 		defer close(streamerDone)
-		if err := streamer.Run(benchCtx); err != nil {
-			slog.Error("streamer error", "submissionId", submissionID, "err", err)
+		
+		currentStreamer := streamer
+		defer func() {
+			if closeErr := currentStreamer.Close(); closeErr != nil {
+				slog.Error("streamer close error", "submissionId", submissionID, "err", closeErr)
+			}
+		}()
+
+		backoff := time.Second
+		for {
+			if err := currentStreamer.Run(benchCtx); err != nil {
+				if benchCtx.Err() != nil {
+					return
+				}
+				slog.Warn("streamer failed, reconnecting", "submissionId", submissionID, "err", err, "backoff", backoff)
+				
+				currentStreamer.Close() // close broken connection
+
+				select {
+				case <-benchCtx.Done():
+					return
+				case <-time.After(backoff):
+				}
+				
+				var newErr error
+				currentStreamer, newErr = emit.NewStreamer(s.cfg.TelemetryGRPCAddr, emitCh)
+				if newErr != nil {
+					slog.Error("failed to recreate streamer", "submissionId", submissionID, "err", newErr)
+					continue // retry after next backoff; don't call Run on nil
+				}
+				
+				backoff *= 2
+				if backoff > 30*time.Second {
+					backoff = 30 * time.Second
+				}
+			} else {
+				return
+			}
 		}
 	}()
 
@@ -88,9 +125,6 @@ func (s *BotFleetServer) StartBenchmark(ctx context.Context, req *gen.BenchmarkC
 			s.activeBenchmarks.Delete(submissionID)
 			// Wait for streamer to finish after coordinator closes emitCh
 			<-streamerDone
-			if closeErr := streamer.Close(); closeErr != nil {
-				slog.Error("streamer close error", "submissionId", submissionID, "err", closeErr)
-			}
 		}()
 
 		if runErr := coordinator.Run(benchCtx, submissionID, targetURL); runErr != nil {
@@ -133,7 +167,6 @@ func main() {
 	slog.Info("bot-fleet starting",
 		"fleetGRPCPort", cfg.FleetGRPCPort,
 		"telemetryGRPCAddr", cfg.TelemetryGRPCAddr,
-		"defaultBotCount", cfg.DefaultBotCount,
 		"timeoutMs", cfg.TimeoutMs,
 		"targetTPS", cfg.TargetTPS,
 	)
