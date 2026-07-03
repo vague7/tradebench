@@ -3,6 +3,8 @@ package aggregate
 import (
 	"context"
 	"log/slog"
+	"runtime"
+	"sync"
 	"time"
 
 	"github.com/bench/shared/types"
@@ -39,13 +41,33 @@ func NewWindowManager(windowSec int, buf *ingest.RingBuffer, store *store.Postgr
 // groups them by SubmissionID, and computes + persists metrics for each group.
 // It exits cleanly when ctx is cancelled.
 func (wm *WindowManager) Run(ctx context.Context) {
+	// Start async validator worker pool with WaitGroup for graceful drain.
+	var workerWg sync.WaitGroup
+	jobCh := make(chan ValidationJob, 1000)
+	workerCount := runtime.NumCPU()
+	if workerCount < 2 {
+		workerCount = 2
+	}
+	for i := 0; i < workerCount; i++ {
+		workerWg.Add(1)
+		go func() {
+			defer workerWg.Done()
+			for job := range jobCh {
+				wm.processValidationJob(ctx, job)
+			}
+		}()
+	}
+
 	ticker := time.NewTicker(time.Duration(wm.windowSec) * time.Second)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
-			slog.Info("window manager shutting down")
+			slog.Info("window manager shutting down, draining validation workers")
+			close(jobCh)
+			workerWg.Wait()
+			slog.Info("window manager shutdown complete")
 			return
 		case <-ticker.C:
 			windowEnd := time.Now().UTC()
@@ -63,9 +85,9 @@ func (wm *WindowManager) Run(ctx context.Context) {
 				grouped[e.SubmissionID] = append(grouped[e.SubmissionID], e)
 			}
 
-			// Compute and persist metrics for each submission.
+			// Compute metrics and dispatch to worker pool for validation and scoring.
 			for submissionID, subEvents := range grouped {
-				wm.computeAndPersist(ctx, submissionID, subEvents, windowEnd)
+				wm.dispatchValidation(ctx, jobCh, submissionID, subEvents, windowEnd)
 			}
 		}
 	}
@@ -75,9 +97,15 @@ func (wm *WindowManager) Run(ctx context.Context) {
 // Set higher than the buffer capacity to ensure we drain everything available.
 const ringBufferDrainSize = 200_000
 
-// computeAndPersist computes latency percentiles, TPS, and success/failure/timeout counts,
-// then persists a MetricSnapshot to the database and triggers scoring.
-func (wm *WindowManager) computeAndPersist(ctx context.Context, submissionID string, events []types.BotEvent, windowEnd time.Time) {
+// ValidationJob encapsulates the work for the async validation pool.
+type ValidationJob struct {
+	events   []types.BotEvent
+	snapshot types.MetricSnapshot
+}
+
+// dispatchValidation computes latency percentiles and TPS,
+// then prepares a ValidationJob and sends it to the async worker pool.
+func (wm *WindowManager) dispatchValidation(ctx context.Context, jobCh chan<- ValidationJob, submissionID string, events []types.BotEvent, windowEnd time.Time) {
 	// Compute latencies.
 	latencies := make([]float64, 0, len(events))
 	for _, e := range events {
@@ -106,12 +134,6 @@ func (wm *WindowManager) computeAndPersist(ctx context.Context, submissionID str
 		}
 	}
 
-	correctnessScore, err := wm.validator.Validate(ctx, events)
-	if err != nil {
-		slog.Warn("correctness validation failed, defaulting to 0.0", "submissionId", submissionID, "err", err)
-		correctnessScore = 0.0
-	}
-
 	snapshot := types.MetricSnapshot{
 		SubmissionID:     submissionID,
 		WindowEnd:        windowEnd,
@@ -122,30 +144,46 @@ func (wm *WindowManager) computeAndPersist(ctx context.Context, submissionID str
 		SuccessCount:     successCount,
 		FailureCount:     failureCount,
 		TimeoutCount:     timeoutCount,
-		CorrectnessScore: correctnessScore,
 	}
 
-	if err := wm.store.InsertMetricSnapshot(ctx, snapshot); err != nil {
+	select {
+	case jobCh <- ValidationJob{events: events, snapshot: snapshot}:
+	case <-time.After(5 * time.Second):
+		slog.Error("validation job channel full after 5s, dropping window metrics", "submissionId", submissionID)
+	}
+}
+
+// processValidationJob executes the C++ validator, inserts the snapshot, and triggers scoring.
+func (wm *WindowManager) processValidationJob(ctx context.Context, job ValidationJob) {
+	correctnessScore, err := wm.validator.Validate(ctx, job.events)
+	if err != nil {
+		slog.Warn("correctness validation failed, defaulting to 0.0", "submissionId", job.snapshot.SubmissionID, "err", err)
+		correctnessScore = 0.0
+	}
+
+	job.snapshot.CorrectnessScore = correctnessScore
+
+	if err := wm.store.InsertMetricSnapshot(ctx, job.snapshot); err != nil {
 		slog.Error("failed to insert metric snapshot",
-			"submissionId", snapshot.SubmissionID,
+			"submissionId", job.snapshot.SubmissionID,
 			"err", err,
 		)
 		return
 	}
 
 	// Trigger scoring after successful MetricSnapshot insert.
-	if err := wm.scorer.Score(ctx, snapshot); err != nil {
+	if err := wm.scorer.Score(ctx, job.snapshot); err != nil {
 		slog.Error("scoring engine failed",
-			"submissionId", snapshot.SubmissionID,
+			"submissionId", job.snapshot.SubmissionID,
 			"err", err,
 		)
 		// A scoring failure must not crash the window manager or stop telemetry collection.
 	}
 
-	slog.Info("window tick processed",
-		"submissionId", submissionID,
-		"eventCount", len(events),
-		"p99Ms", snapshot.P99LatencyMs,
-		"tps", snapshot.TPS,
+	slog.Info("window tick processed async",
+		"submissionId", job.snapshot.SubmissionID,
+		"eventCount", len(job.events),
+		"p99Ms", job.snapshot.P99LatencyMs,
+		"tps", job.snapshot.TPS,
 	)
 }
