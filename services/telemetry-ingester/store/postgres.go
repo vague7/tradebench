@@ -144,9 +144,6 @@ func (s *PostgresStore) Close() error {
 }
 
 // ---------------------------------------------------------------------------
-// RedisStore
-// ---------------------------------------------------------------------------
-
 // RedisStore provides access to Redis for the telemetry-ingester.
 type RedisStore struct {
 	client *redis.Client
@@ -165,6 +162,14 @@ func NewRedisStore(addr string) *RedisStore {
 func (r *RedisStore) SetWithTTL(ctx context.Context, key string, value []byte, ttl time.Duration) error {
 	if err := r.client.Set(ctx, key, value, ttl).Err(); err != nil {
 		return fmt.Errorf("store: RedisStore SetWithTTL for key %s: %w", key, err)
+	}
+	return nil
+}
+
+// Publish sends a message to a Redis Pub/Sub channel.
+func (r *RedisStore) Publish(ctx context.Context, channel string, message []byte) error {
+	if err := r.client.Publish(ctx, channel, message).Err(); err != nil {
+		return fmt.Errorf("store: RedisStore Publish to %s: %w", channel, err)
 	}
 	return nil
 }

@@ -110,16 +110,15 @@ export function LeaderboardTable({ entries, loading }: LeaderboardTableProps) {
               <th>Error %</th>
               <th>Correct %</th>
               <th>Status</th>
-              <th>Updated</th>
               {tab === 'failing' && <th>Reason</th>}
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={tab === 'rankings' ? 9 : 9} className="table-empty"><span className="loading-pulse">Loading…</span></td></tr>
+              <tr><td colSpan={tab === 'rankings' ? 8 : 8} className="table-empty"><span className="loading-pulse">Loading…</span></td></tr>
             ) : showEntries.length === 0 ? (
               <tr>
-                <td colSpan={tab === 'rankings' ? 9 : 9} className="table-empty">
+                <td colSpan={tab === 'rankings' ? 8 : 8} className="table-empty">
                   {tab === 'rankings'
                     ? 'No scored submissions yet.'
                     : 'No disqualified submissions.'}
@@ -149,7 +148,7 @@ export function LeaderboardTable({ entries, loading }: LeaderboardTableProps) {
                       <div className="score-cell">
                         <span className="score-num">{e.finalScore.toFixed(2)}</span>
                         <div className="score-bar">
-                          <div className="score-bar-fill" style={{ width: `${Math.min(e.finalScore * 100, 100)}%` }} />
+                          <div className="score-bar-fill" style={{ width: `${Math.min(e.finalScore, 100)}%` }} />
                         </div>
                       </div>
                     </td>
@@ -164,7 +163,6 @@ export function LeaderboardTable({ entries, loading }: LeaderboardTableProps) {
                     <td>
                       {e.isDisqualified ? <DisqualifiedPill /> : <StatusPill status={e.status} />}
                     </td>
-                    <td className="mono time-cell">{timeAgo(e.updatedAt)}</td>
                     {tab === 'failing' && (
                       <td className="reason-cell">
                         {e.status === 'FAILED' ? 'Build/Runtime Failed' : normCorrect(e.correctnessScore) < 30 ? 'Correctness < 30%' : 'Disqualified'}

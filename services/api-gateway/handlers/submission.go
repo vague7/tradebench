@@ -206,6 +206,12 @@ func (h *SubmissionHandler) handleSubmissionAction(w http.ResponseWriter, r *htt
 			return
 		}
 		h.handleGetResults(w, r, submissionID)
+	case "history":
+		if r.Method != http.MethodGet {
+			middleware.WriteAPIError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "method not allowed")
+			return
+		}
+		h.handleGetHistory(w, r, submissionID)
 	default:
 		middleware.WriteAPIError(w, http.StatusNotFound, "NOT_FOUND", "resource not found")
 	}
@@ -262,7 +268,7 @@ func (h *SubmissionHandler) handleGetResults(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	if !snapFound || !scoreFound {
+	if !snapFound && !scoreFound {
 		middleware.WriteAPIError(w, http.StatusNotFound, "NOT_READY", "results are not available yet")
 		return
 	}
@@ -272,6 +278,26 @@ func (h *SubmissionHandler) handleGetResults(w http.ResponseWriter, r *http.Requ
 		Snapshot: snapshot,
 		Score:    score,
 	})
+}
+
+func (h *SubmissionHandler) handleGetHistory(w http.ResponseWriter, r *http.Request, submissionID string) {
+	ctx := r.Context()
+
+	history, err := h.store.GetSnapshotHistory(ctx, submissionID)
+	if err != nil {
+		slog.Error("get snapshot history failed", "submissionId", submissionID, "err", err)
+		middleware.WriteAPIError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to fetch snapshot history")
+		return
+	}
+
+	if len(history) == 0 {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte("[]"))
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(history)
 }
 
 // validateZipHasDockerfile returns an error if the ZIP bytes contain no "Dockerfile" entry.

@@ -42,3 +42,8 @@ func (r *RedisClient) Close() error {
 func (r *RedisClient) Client() *redis.Client {
 	return r.client
 }
+
+// Subscribe returns a Redis Pub/Sub subscription for the given channels.
+func (r *RedisClient) Subscribe(ctx context.Context, channels ...string) *redis.PubSub {
+	return r.client.Subscribe(ctx, channels...)
+}

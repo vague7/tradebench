@@ -110,22 +110,20 @@ func (e *Engine) Score(ctx context.Context, snap types.MetricSnapshot) error {
 		// This is recoverable: a retry on the next window tick will re-run Score().
 	}
 
-	// 6. Publish MetricSnapshot JSON to Redis (submission:{id}:snapshot, TTL 30s).
-	jsonBytes, err := json.Marshal(snap)
+	// 6. Publish score update to Redis Pub/Sub for real-time SSE leaderboard.
+	jsonBytes, err := json.Marshal(score)
 	if err != nil {
-		slog.Warn("failed to marshal metric snapshot for Redis",
+		slog.Warn("failed to marshal score for Redis Pub/Sub",
 			"submissionId", snap.SubmissionID,
 			"err", err,
 		)
 	} else {
-		redisKey := fmt.Sprintf("submission:%s:snapshot", snap.SubmissionID)
-		if err := e.redis.SetWithTTL(ctx, redisKey, jsonBytes, 30*time.Second); err != nil {
-			slog.Warn("failed to write metric snapshot to Redis",
+		if err := e.redis.Publish(ctx, "channel:leaderboard", jsonBytes); err != nil {
+			slog.Warn("failed to publish score update to Redis",
 				"submissionId", snap.SubmissionID,
-				"key", redisKey,
 				"err", err,
 			)
-			// Redis write failure must not abort the scoring pipeline.
+			// Pub/Sub failure must not abort the scoring pipeline.
 		}
 	}
 

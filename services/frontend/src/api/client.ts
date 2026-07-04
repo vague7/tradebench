@@ -1,6 +1,7 @@
 import type {
   ApiErrorShape,
   LeaderboardEntry,
+  MetricSnapshot,
   Submission,
   SubmissionResults,
   SubmissionUploadResponse,
@@ -97,6 +98,17 @@ export async function getSubmissionResults(
 export async function getLeaderboard(): Promise<LeaderboardEntry[]> {
   const response = await fetch(buildUrl('/api/leaderboard'));
   return parseResponse<LeaderboardEntry[]>(response);
+}
+
+export async function getSubmissionHistory(
+  submissionId: string,
+  token: string,
+): Promise<MetricSnapshot[]> {
+  const response = await fetch(
+    buildUrl(`/api/submissions/${submissionId}/history`),
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+  return parseResponse<MetricSnapshot[]>(response);
 }
 
 export async function startBenchmark(

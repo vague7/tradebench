@@ -174,6 +174,39 @@ func (s *PostgresStore) GetLatestSnapshot(ctx context.Context, submissionID stri
 	return snap, true, nil
 }
 
+func (s *PostgresStore) GetSnapshotHistory(ctx context.Context, submissionID string) ([]benchtypes.MetricSnapshot, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT submission_id, window_end, p50_latency_ms, p90_latency_ms, p99_latency_ms,
+		       tps, success_count, failure_count, timeout_count, correctness
+		FROM metric_snapshots
+		WHERE submission_id = $1
+		ORDER BY window_end ASC`,
+		submissionID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("postgres: get snapshot history: %w", err)
+	}
+	defer rows.Close()
+
+	var snaps []benchtypes.MetricSnapshot
+	for rows.Next() {
+		var snap benchtypes.MetricSnapshot
+		if err := rows.Scan(
+			&snap.SubmissionID, &snap.WindowEnd,
+			&snap.P50LatencyMs, &snap.P90LatencyMs, &snap.P99LatencyMs,
+			&snap.TPS, &snap.SuccessCount, &snap.FailureCount, &snap.TimeoutCount,
+			&snap.CorrectnessScore,
+		); err != nil {
+			return nil, fmt.Errorf("postgres: history scan: %w", err)
+		}
+		snaps = append(snaps, snap)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("postgres: history rows: %w", err)
+	}
+	return snaps, nil
+}
+
 // ── Scores ───────────────────────────────────────────────────────────────────
 
 func (s *PostgresStore) InsertScore(ctx context.Context, score benchtypes.Score) error {
