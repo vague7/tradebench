@@ -56,9 +56,13 @@ func (h *LeaderboardHandler) handleLeaderboardStream(w http.ResponseWriter, r *h
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 
-	ticker := time.NewTicker(time.Duration(h.cfg.LeaderboardSSEIntervalMs) * time.Millisecond)
-	defer ticker.Stop()
+	// Subscribe to Redis Pub/Sub for real-time score updates.
+	pubsub := h.redis.Subscribe(r.Context(), "channel:leaderboard")
+	defer pubsub.Close()
 
+	msgCh := pubsub.Channel()
+
+	// Send the full leaderboard immediately on connect.
 	send := func() {
 		entries, err := h.store.ListLeaderboard(r.Context())
 		if err != nil {
@@ -79,12 +83,25 @@ func (h *LeaderboardHandler) handleLeaderboardStream(w http.ResponseWriter, r *h
 	}
 
 	send()
+
+	// 30-second SSE keepalive prevents proxies/CDNs from closing idle connections.
+	keepalive := time.NewTicker(30 * time.Second)
+	defer keepalive.Stop()
+
 	for {
 		select {
 		case <-r.Context().Done():
 			return
-		case <-ticker.C:
+		case _, ok := <-msgCh:
+			if !ok {
+				return // subscription closed
+			}
+			// A score was updated — re-query Postgres for the full ranked leaderboard.
 			send()
+		case <-keepalive.C:
+			_, _ = fmt.Fprintf(w, ": keepalive\n\n")
+			flusher.Flush()
 		}
 	}
 }
+

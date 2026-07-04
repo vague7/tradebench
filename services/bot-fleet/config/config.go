@@ -9,7 +9,6 @@ import (
 // Config holds all bot-fleet configuration loaded from environment variables.
 // Field names match PRD Section 7 exactly.
 type Config struct {
-	DefaultBotCount  int     // BOT_DEFAULT_COUNT: default concurrent bots
 	TimeoutMs        int     // BOT_TIMEOUT_MS: per-request timeout in milliseconds
 	TargetTPS        float64 // BOT_TARGET_TPS: target TPS for observability logging
 	TelemetryGRPCAddr string // TELEMETRY_GRPC_ADDR: gRPC address of telemetry-ingester
@@ -40,7 +39,6 @@ func Load() *Config {
 	}
 
 	return &Config{
-		DefaultBotCount:   requiredInt("BOT_DEFAULT_COUNT"),
 		TimeoutMs:         requiredInt("BOT_TIMEOUT_MS"),
 		TargetTPS:         requiredFloat64("BOT_TARGET_TPS"),
 		TelemetryGRPCAddr: required("TELEMETRY_GRPC_ADDR"),

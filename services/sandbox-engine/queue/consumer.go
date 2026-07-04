@@ -7,8 +7,12 @@ import (
 	"strings"
 	"time"
 
+	gen "github.com/bench/shared/proto/gen"
 	"github.com/bench/sandbox-engine/runner"
 	"github.com/redis/go-redis/v9"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+
 )
 
 const (
@@ -16,10 +20,9 @@ const (
 	consumerGroup = "sandbox-engine"
 	consumerName  = "sandbox-engine-1"
 	blockDuration = 5 * time.Second
+	botFleetAddr  = "dns:///bot-fleet:9002"
 
-	// Redis key TTLs (PRD Section 4.4)
 	statusKeyTTL = time.Hour
-	readyKeyTTL  = 10 * time.Minute
 
 	// pelMinIdle is how long a message must sit unacked in the PEL before this
 	// consumer instance reclaims it from a previous (now-dead) instance.
@@ -34,7 +37,7 @@ type StatusUpdater interface {
 }
 
 // Consumer reads jobs from the Redis stream and drives each submission through
-// the Build → Spawn → HealthCheck → Ready pipeline.
+// the Build → Spawn → HealthCheck.
 type Consumer struct {
 	rdb          *redis.Client
 	builder      *runner.Builder
@@ -75,16 +78,10 @@ func NewConsumer(
 }
 
 // ensureGroup creates the consumer group if it does not exist.
-//
-// The original code used start ID "0", which means "replay all messages from
-// the beginning of the stream". That is dangerous: if the stream has history
-// from a previous run, every message is re-delivered on startup.
-//
-// We use "$" so a freshly-created group only sees messages that arrive after
-// it is created — the standard production default.
-//
-// If the group already exists the BUSYGROUP error is swallowed; the existing
-// last-delivered-ID is unchanged, which is what we want.
+// use "$" so a freshly-created group only sees messages that arrive after
+
+// if the group already exists the BUSYGROUP error is swallowed;
+// the existing last-delivered-ID is unchanged.
 func (c *Consumer) ensureGroup(ctx context.Context) error {
 	err := c.rdb.XGroupCreateMkStream(ctx, jobStreamKey, consumerGroup, "$").Err()
 	if err != nil && !strings.Contains(err.Error(), "BUSYGROUP") {
@@ -94,10 +91,6 @@ func (c *Consumer) ensureGroup(ctx context.Context) error {
 }
 
 // reclaimPEL reclaims messages that have been sitting in the Pending Entry
-// List for longer than pelMinIdle. This covers the case where a previous
-// sandbox-engine instance crashed after receiving a message but before ACKing
-// it. Without this loop those messages would be stuck in the PEL forever
-// because XReadGroup with ">" only delivers *new* messages.
 func (c *Consumer) reclaimPEL(ctx context.Context) {
 	for {
 		res, _, err := c.rdb.XAutoClaim(ctx, &redis.XAutoClaimArgs{
@@ -109,9 +102,7 @@ func (c *Consumer) reclaimPEL(ctx context.Context) {
 			Count:    10,
 		}).Result()
 		if err != nil {
-			// NOGROUP can appear here on the very first startup before the
-			// group exists; ensureGroup is called first so this should not
-			// happen, but guard anyway.
+			// NOGROUP can appear here on the very first startup before the group exists
 			slog.Error("consumer: xautoclaim error", "err", err)
 			return
 		}
@@ -132,7 +123,7 @@ func (c *Consumer) Run(ctx context.Context) error {
 		return err
 	}
 
-	// Reclaim any messages that were left unacked by a previous instance.
+	// reclaim any messages that were left unacked by a previous instance.
 	c.reclaimPEL(ctx)
 
 	slog.Info("consumer: listening",
@@ -163,9 +154,7 @@ func (c *Consumer) Run(ctx context.Context) error {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
-			// NOGROUP means the stream or group was deleted out from under us
-			// (e.g. someone ran DEL stream:jobs or XGROUP DESTROY in Redis).
-			// Re-create the group and keep going rather than crashing.
+
 			if strings.Contains(err.Error(), "NOGROUP") {
 				slog.Warn("consumer: group missing, recreating", "err", err)
 				if recreateErr := c.ensureGroup(ctx); recreateErr != nil {
@@ -189,7 +178,7 @@ func (c *Consumer) Run(ctx context.Context) error {
 
 // dispatch acquires a concurrency slot and processes msg in a goroutine.
 func (c *Consumer) dispatch(ctx context.Context, msg redis.XMessage) {
-	// Acquire concurrency slot — blocks if at capacity.
+	// acquire concurrency slot from semaphore  — blocks if at capacity.
 	select {
 	case c.sem <- struct{}{}:
 	case <-ctx.Done():
@@ -223,7 +212,6 @@ func (c *Consumer) process(ctx context.Context, msg redis.XMessage) error {
 	// ── BUILDING ─────────────────────────────────────────────────────────────
 	c.setStatus(ctx, submissionID, "BUILDING", "")
 
-	// Apply build timeout from config (PRD FR-2: context.WithTimeout 120s).
 	buildCtx, buildCancel := context.WithTimeout(ctx, c.buildTimeout)
 	defer buildCancel()
 
@@ -241,16 +229,16 @@ func (c *Consumer) process(ctx context.Context, msg redis.XMessage) error {
 		return fmt.Errorf("consumer: spawn: %w", err)
 	}
 
-	// Write image_tag, container_id, container_port to Postgres (PRD schema).
+	// write image_tag, container_id, container_port to Postgres .
 	if err := c.db.UpdateImageAndContainer(ctx, submissionID, imageTag, containerID, port); err != nil {
-		// Non-fatal — pipeline can continue; log for observability.
+		// log for observability
 		slog.Error("consumer: UpdateImageAndContainer failed",
 			"submissionId", submissionID,
 			"err", err,
 		)
 	}
 
-	// Register before health check so the watchdog can clean up on timeout.
+	// register before health check so the watchdog can clean up on timeout.
 	c.registry.Add(submissionID, containerID, port, time.Now())
 
 	// ── HEALTH CHECK ─────────────────────────────────────────────────────────
@@ -260,12 +248,33 @@ func (c *Consumer) process(ctx context.Context, msg redis.XMessage) error {
 		return fmt.Errorf("consumer: health: %w", err)
 	}
 
-	// ── BENCHMARKING — publish ready key for trigger watcher ──────────────────
+	// ── BENCHMARKING ──────────────────
 	c.setStatus(ctx, submissionID, "BENCHMARKING", "")
 
-	readyKey := "submission:" + submissionID + ":ready"
 	targetHost := fmt.Sprintf("submission-%s:8080", shortID(submissionID))
-	_ = c.rdb.Set(ctx, readyKey, targetHost, readyKeyTTL).Err()
+
+	conn, err := grpc.NewClient(botFleetAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		slog.Error("trigger: grpc dial failed", "submissionId", submissionID, "err", err)
+		c.setStatus(ctx, submissionID, "FAILED", "benchmark start failed: "+err.Error())
+		return fmt.Errorf("consumer: grpc dial: %w", err)
+	}
+	defer conn.Close()
+
+	client := gen.NewBotFleetClient(conn)
+	callCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	_, err = client.StartBenchmark(callCtx, &gen.BenchmarkConfig{
+		SubmissionId: submissionID,
+		TargetHost:  targetHost,
+	})
+	if err != nil {
+		slog.Error("trigger: StartBenchmark failed", "submissionId", submissionID, "err", err)
+		c.setStatus(ctx, submissionID, "FAILED", "benchmark start failed: "+err.Error())
+		return fmt.Errorf("consumer: start benchmark: %w", err)
+	}
+	slog.Info("trigger: benchmark started", "submissionId", submissionID, "targetHost", targetHost)
 
 	slog.Info("consumer: container ready",
 		"submissionId", submissionID,
@@ -277,8 +286,6 @@ func (c *Consumer) process(ctx context.Context, msg redis.XMessage) error {
 }
 
 // setStatus updates both Postgres and the Redis submission:{id}:status key.
-// Errors are logged but never returned — a status update failure must not abort
-// the pipeline; the container state is authoritative.
 func (c *Consumer) setStatus(ctx context.Context, submissionID, status, errMsg string) {
 	if err := c.db.UpdateStatus(ctx, submissionID, status, errMsg); err != nil {
 		slog.Error("consumer: UpdateStatus failed",
@@ -288,7 +295,7 @@ func (c *Consumer) setStatus(ctx context.Context, submissionID, status, errMsg s
 		)
 	}
 
-	// Write Redis cache key: submission:{id}:status (PRD Section 4.4, TTL 1h).
+	// write Redis cache key: submission:{id}:status (PRD Section 4.4, TTL 1h).
 	redisKey := "submission:" + submissionID + ":status"
 	if err := c.rdb.Set(ctx, redisKey, status, statusKeyTTL).Err(); err != nil {
 		slog.Error("consumer: redis SetStatus failed",

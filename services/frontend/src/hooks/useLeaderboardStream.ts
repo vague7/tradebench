@@ -44,7 +44,7 @@ export function useLeaderboardStream(): LeaderboardStreamState {
     setError(null);
     try {
       const data = await getLeaderboard();
-      setEntries(data);
+      setEntries(data || []);
       setLastUpdated(new Date());
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load leaderboard');
@@ -60,7 +60,7 @@ export function useLeaderboardStream(): LeaderboardStreamState {
 
   // SSE subscription.
   const handleUpdate = useCallback((next: LeaderboardEntry[]) => {
-    setEntries(next);
+    setEntries(next || []);
     setLastUpdated(new Date());
     setError(null);
   }, []);

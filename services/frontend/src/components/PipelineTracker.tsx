@@ -1,4 +1,5 @@
 import type { SubmissionStatus } from '../types/api';
+import { BenchmarkStageInfo } from './BenchmarkStageInfo';
 
 const PIPELINE_STEPS: { status: SubmissionStatus; label: string; description: string }[] = [
   { status: 'UPLOADED', label: 'Upload', description: 'ZIP received and validated' },
@@ -24,7 +25,7 @@ interface SubmissionPipelineProps {
 
 export function SubmissionPipeline({ currentStatus }: SubmissionPipelineProps) {
   const isPreview = currentStatus === null;
-  const currentIndex = currentStatus ? STATUS_ORDER[currentStatus] : -1;
+  const currentIndex = currentStatus ? (currentStatus === 'SCORED' ? 5 : STATUS_ORDER[currentStatus]) : -1;
   const isFailed = currentStatus === 'FAILED';
 
   return (
@@ -71,6 +72,7 @@ export function SubmissionPipeline({ currentStatus }: SubmissionPipelineProps) {
           );
         })}
       </div>
-    </div>
+    <BenchmarkStageInfo currentStatus={currentStatus} />
+  </div>
   );
 }

@@ -10,8 +10,6 @@ import (
 	"github.com/bench/api-gateway/config"
 	"github.com/bench/api-gateway/handlers"
 	"github.com/bench/api-gateway/store"
-	"github.com/bench/api-gateway/trigger"
-
 )
 
 func corsMiddleware(next http.Handler) http.Handler {
@@ -45,10 +43,6 @@ func main() {
 		log.Fatalf("FATAL: redis init failed: %v", err)
 	}
 	defer redisClient.Close()
-
-	// Start the ready-event watcher; triggers bot-fleet when a container is healthy.
-	watcher := trigger.NewWatcher(redisClient.Client())
-	go watcher.Run(ctx)
 
 	mux := http.NewServeMux()
 

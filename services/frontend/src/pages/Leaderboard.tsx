@@ -35,22 +35,7 @@ export function LeaderboardPage({ onNavigateToSubmit }: LeaderboardPageProps) {
       )}
 
       {/* Content */}
-      {!loading && entries.length === 0 && !error ? (
-        <EmptyState
-          icon={
-            <svg width="36" height="36" viewBox="0 0 36 36" fill="none">
-              <rect x="4" y="6" width="28" height="24" rx="3" stroke="currentColor" strokeWidth="1.8"/>
-              <path d="M4 12h28" stroke="currentColor" strokeWidth="1.8"/>
-              <path d="M12 18h12M12 23h8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
-            </svg>
-          }
-          title="No scored submissions yet."
-          description="Upload a valid exchange to start the benchmark pipeline."
-          action={onNavigateToSubmit ? { label: 'Go to Submit', onClick: onNavigateToSubmit } : undefined}
-        />
-      ) : (
-        <LeaderboardTable entries={entries} loading={loading} />
-      )}
+      <LeaderboardTable entries={entries} loading={loading} />
     </div>
   );
 }

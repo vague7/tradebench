@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 import { ApiHealthBadge } from './components/ConnectionBadge';
 import { ToastContainer } from './components/Toast';
@@ -10,7 +10,18 @@ type View = 'submit' | 'leaderboard';
 
 export function App() {
   const [view, setView] = useState<View>('submit');
+  const [isDark, setIsDark] = useState(() => localStorage.getItem('bench_theme') === 'dark');
   const apiHealth = useApiHealth();
+
+  useEffect(() => {
+    if (isDark) {
+      document.documentElement.classList.add('dark');
+      localStorage.setItem('bench_theme', 'dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+      localStorage.setItem('bench_theme', 'light');
+    }
+  }, [isDark]);
 
   return (
     <div className="app-shell">
@@ -54,6 +65,23 @@ export function App() {
         </div>
 
         <div className="topbar-right">
+          <button 
+            className="theme-toggle" 
+            onClick={() => setIsDark(!isDark)}
+            title="Toggle Dark Mode"
+            style={{
+              background: 'var(--bg-inset)',
+              color: 'var(--text-1)',
+              border: '1px solid var(--border)',
+              borderRadius: 'var(--radius-s)',
+              padding: '6px 12px',
+              fontSize: '0.85rem',
+              fontWeight: 600,
+              cursor: 'pointer'
+            }}
+          >
+            {isDark ? 'Light Mode' : 'Dark Mode'}
+          </button>
           <ApiHealthBadge state={apiHealth} />
         </div>
       </header>

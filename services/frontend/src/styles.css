@@ -5,47 +5,74 @@
 
 /* ─── Tokens ────────────────────────────────────────────── */
 :root {
-  --font-sans: 'Inter', 'Segoe UI', system-ui, sans-serif;
-  --font-mono: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  --font-sans: 'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
 
-  --bg-base: #f7f7f5;
-  --bg-surface: #ffffff;
-  --bg-inset: #f2f2f0;
-  --bg-hover: rgba(0,0,0,0.025);
+  /* Latte cappuccino palette */
+  --bg-base: #f5f0e8;
+  --bg-surface: #fdf9f3;
+  --bg-inset: #ede8df;
+  --bg-hover: rgba(120,80,30,0.04);
 
-  --border: rgba(0,0,0,0.08);
-  --border-input: rgba(0,0,0,0.14);
+  --border: rgba(120,80,30,0.12);
+  --border-input: rgba(120,80,30,0.2);
 
-  --text-1: #111827;
-  --text-2: #4b5563;
-  --text-3: #9ca3af;
+  --text-1: #1c1410;
+  --text-2: #5c4a38;
+  --text-3: #9e8a76;
 
-  --accent: #FF7A00;
-  --accent-end: #FF3D00;
+  --accent: #c25b00;
+  --accent-end: #a33d00;
   --accent-gradient: linear-gradient(135deg, var(--accent) 0%, var(--accent-end) 100%);
 
-  --green: #059669;
-  --amber: #d97706;
-  --red: #dc2626;
-  --blue: #3b82f6;
-  --purple: #7c3aed;
+  --green: #2d7a4f;
+  --amber: #b45309;
+  --red: #b91c1c;
+  --blue: #1d4ed8;
+  --purple: #6d28d9;
 
-  --green-bg: rgba(5,150,105,0.08);
-  --amber-bg: rgba(217,119,6,0.08);
-  --red-bg: rgba(220,38,38,0.08);
-  --blue-bg: rgba(59,130,246,0.08);
-  --purple-bg: rgba(124,58,237,0.08);
+  --green-bg: rgba(45,122,79,0.1);
+  --amber-bg: rgba(180,83,9,0.1);
+  --red-bg: rgba(185,28,28,0.1);
+  --blue-bg: rgba(29,78,216,0.08);
+  --purple-bg: rgba(109,40,217,0.08);
 
   --radius-s: 8px;
   --radius-m: 12px;
   --radius-l: 16px;
   --radius-pill: 999px;
-  --shadow: 0 1px 3px rgba(0,0,0,0.05), 0 1px 2px rgba(0,0,0,0.03);
+  --shadow: 0 1px 4px rgba(120,80,30,0.08), 0 1px 2px rgba(120,80,30,0.04);
 
   font-family: var(--font-sans);
   color: var(--text-1);
   line-height: 1.5;
   background: var(--bg-base);
+}
+
+.dark {
+  --bg-base: #121212;
+  --bg-surface: #1e1e1e;
+  --bg-inset: #181818;
+  --bg-hover: rgba(255,255,255,0.05);
+
+  --border: rgba(255,255,255,0.1);
+  --border-input: rgba(255,255,255,0.2);
+
+  --text-1: #f9fafb;
+  --text-2: #d1d5db;
+  --text-3: #9ca3af;
+
+  --green: #10b981;
+  --amber: #f59e0b;
+  --red: #ef4444;
+  --blue: #60a5fa;
+  --purple: #8b5cf6;
+
+  --green-bg: rgba(16,185,129,0.15);
+  --amber-bg: rgba(245,158,11,0.15);
+  --red-bg: rgba(239,68,68,0.15);
+  --blue-bg: rgba(96,165,250,0.15);
+  --purple-bg: rgba(139,92,246,0.15);
 }
 
 /* ─── Reset ─────────────────────────────────────────────── */
@@ -123,9 +150,13 @@ input:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 /* ═══════════════════════════════════════════════════════════
    SUBMIT PAGE LAYOUT
    ═══════════════════════════════════════════════════════════ */
+/* submit-page: outer column wrapper */
+.submit-page{display:flex;flex-direction:column;gap:20px}
+/* submit-layout: left column fixed width, right column free-expands */
 .submit-layout{display:grid;grid-template-columns:360px 1fr;gap:20px;align-items:start}
 @media(max-width:860px){.submit-layout{grid-template-columns:1fr}}
-.submit-left{display:flex;flex-direction:column;gap:14px}
+/* Left column: same height as right but clamps — event log fills available space */
+.submit-left{display:flex;flex-direction:column;gap:14px;position:sticky;top:0;max-height:100vh;overflow:hidden}
 .submit-right{display:flex;flex-direction:column;gap:14px}
 
 /* ═══════════════════════════════════════════════════════════
@@ -207,7 +238,7 @@ input:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 /* ═══════════════════════════════════════════════════════════
    PIPELINE (Vertical Timeline)
    ═══════════════════════════════════════════════════════════ */
-.pipeline{background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--radius-l);box-shadow:var(--shadow);padding:18px}
+.pipeline{background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--radius-l);box-shadow:var(--shadow);padding:18px;display:grid;grid-template-columns:auto 1fr;gap:0 20px;align-items:start}
 .pipeline-steps{display:flex;flex-direction:column;gap:0}
 
 .pipeline-step{display:flex;align-items:flex-start;gap:10px;padding:10px 0;position:relative}
@@ -401,9 +432,11 @@ input:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 /* ═══════════════════════════════════════════════════════════
    EVENT LOG
    ═══════════════════════════════════════════════════════════ */
-.event-log{padding:14px 16px}
-.event-log .section-label{margin-bottom:8px}
-.event-log-scroll{max-height:140px;overflow-y:auto;display:flex;flex-direction:column;gap:3px}
+.event-log{padding:14px 16px;display:flex;flex-direction:column;flex:1;min-height:0;overflow:hidden}
+.event-log .section-label{margin-bottom:8px;flex-shrink:0}
+.event-log-scroll{overflow-y:auto;display:flex;flex-direction:column;gap:3px;flex:1;min-height:0}
+.event-log-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-shrink:0}
+.event-log-count{font-size:0.7rem;color:var(--text-3);font-family:var(--font-mono)}
 .event-line{display:flex;align-items:baseline;gap:8px;font-size:0.76rem;font-family:var(--font-mono);padding:2px 0}
 .event-time{color:var(--text-3);flex-shrink:0;font-size:0.7rem}
 .event-msg{color:var(--text-2)}
@@ -412,3 +445,46 @@ input:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .event-line--info .event-time::before{content:'›';margin-right:3px;color:var(--text-3)}
 .event-line--success .event-time::before{content:'✓';margin-right:3px;color:var(--green)}
 .event-line--error .event-time::before{content:'✕';margin-right:3px;color:var(--red)}
+.event-line--metric .event-msg{color:var(--text-2);opacity:0.85}
+.event-line--metric .event-time::before{content:'·';margin-right:3px;color:var(--accent)}
+
+/* ═══════════════════════════════════════════════════════════
+   METRICS CHART
+   ═══════════════════════════════════════════════════════════ */
+.chart-panel{padding:14px 16px 10px}
+.chart-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+.chart-range{font-size:0.72rem;color:var(--text-3)}
+.chart-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.chart-cell{background:var(--bg-inset);border-radius:var(--radius-s);padding:10px 12px;border:1px solid var(--border)}
+.chart-cell-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+.chart-cell-label{font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:0.05em}
+.chart-cell-latest{font-size:0.88rem;font-weight:700;color:var(--text-1)}
+.chart-svg{display:block;overflow:visible}
+.chart-xaxis{display:flex;justify-content:space-between;margin-top:8px;font-size:0.68rem;color:var(--text-3)}
+.chart-empty{display:flex;align-items:center;justify-content:center;padding:32px;color:var(--text-3);font-size:0.82rem;background:var(--bg-inset);border-radius:var(--radius-s);border:1px dashed var(--border)}
+
+/* ═══════════════════════════════════════════════════════════
+   DIAGNOSIS PANEL
+   ═══════════════════════════════════════════════════════════ */
+.diag-panel{padding:14px 16px}
+.diag-scroll{display:flex;flex-direction:column;gap:20px;max-height:400px;overflow-y:auto;padding-right:4px}
+.diag-run{display:flex;flex-direction:column;gap:8px}
+.diag-run-header{display:flex;justify-content:space-between;align-items:center;padding-bottom:5px;border-bottom:1px solid var(--border)}
+.diag-run-id{font-size:0.75rem;font-weight:600;color:var(--text-2)}
+.diag-run-meta{font-size:0.72rem;color:var(--text-3)}
+/* Cards: horizontal row that wraps */
+.diag-cards{display:flex;flex-direction:column;gap:6px}
+.diag-card{display:flex;align-items:baseline;gap:8px;padding:7px 10px;border-radius:var(--radius-s);background:var(--bg-inset);border-left:3px solid transparent;flex:1;min-width:260px}
+.diag-card--critical{border-left-color:var(--red)}
+.diag-card--warning{border-left-color:var(--amber)}
+.diag-card--ok{border-left-color:var(--green)}
+.diag-chip{font-size:0.6rem;font-weight:800;letter-spacing:0.08em;padding:2px 6px;border-radius:var(--radius-pill);color:#fff;flex-shrink:0;align-self:center}
+.diag-card-title{font-size:0.8rem;font-weight:700;color:var(--text-1);flex-shrink:0}
+.diag-card-detail{font-size:0.76rem;color:var(--text-2);font-family:var(--font-mono);line-height:1.4}
+
+/* ═══════════════════════════════════════════════════════════
+   PIPELINE STAGE INFO
+   ═══════════════════════════════════════════════════════════ */
+.stage-info{padding:4px 0 4px 20px;border-left:1px solid var(--border);display:flex;flex-direction:column;gap:4px}
+.stage-info-title{font-size:0.78rem;font-weight:700;color:var(--text-1)}
+.stage-info-desc{font-size:0.74rem;color:var(--text-2);line-height:1.5}

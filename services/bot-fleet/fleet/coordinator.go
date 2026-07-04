@@ -172,9 +172,14 @@ func (c *Coordinator) linearRamp(ctx context.Context, phase Phase, currentCount,
 }
 
 // sustainedWithAdversarial holds at current bot count while injecting adversarial
-// scenarios at 30-second intervals during the sustained phase.
+// scenarios at dynamically calculated intervals during the sustained phase.
 func (c *Coordinator) sustainedWithAdversarial(ctx context.Context, duration time.Duration) error {
-	injectionInterval := 30 * time.Second
+	intervalSec := c.cfg.SustainedDuration / 3
+	if intervalSec < 1 {
+		intervalSec = 1 // Floor at 1 second to prevent panic/spam
+	}
+	injectionInterval := time.Duration(intervalSec) * time.Second
+	
 	ticker := time.NewTicker(injectionInterval)
 	defer ticker.Stop()
 
@@ -196,11 +201,12 @@ func (c *Coordinator) sustainedWithAdversarial(ctx context.Context, duration tim
 // injectAdversarialScenarios launches all five adversarial scenarios in goroutines.
 // Each scenario runs once per injection cycle; they run concurrently.
 func (c *Coordinator) injectAdversarialScenarios(ctx context.Context) {
-	go bot.SimultaneousCrossingOrders(ctx, c.submissionID, c.targetURL, c.cfg.TimeoutMs, c.emitCh)
-	go bot.RapidCancelReplace(ctx, c.submissionID, c.targetURL, c.cfg.TimeoutMs, c.emitCh)
-	go bot.OrderBookFlood(ctx, c.submissionID, c.targetURL, c.cfg.TimeoutMs, c.emitCh)
-	go bot.FatFinger(ctx, c.submissionID, c.targetURL, c.cfg.TimeoutMs, c.emitCh)
-	go bot.StaleCancel(ctx, c.submissionID, c.targetURL, c.cfg.TimeoutMs, c.emitCh)
+	c.wg.Add(5)
+	go func() { defer c.wg.Done(); bot.SimultaneousCrossingOrders(ctx, c.submissionID, c.targetURL, c.cfg.TimeoutMs, c.emitCh) }()
+	go func() { defer c.wg.Done(); bot.RapidCancelReplace(ctx, c.submissionID, c.targetURL, c.cfg.TimeoutMs, c.emitCh) }()
+	go func() { defer c.wg.Done(); bot.OrderBookFlood(ctx, c.submissionID, c.targetURL, c.cfg.TimeoutMs, c.emitCh) }()
+	go func() { defer c.wg.Done(); bot.FatFinger(ctx, c.submissionID, c.targetURL, c.cfg.TimeoutMs, c.emitCh) }()
+	go func() { defer c.wg.Done(); bot.StaleCancel(ctx, c.submissionID, c.targetURL, c.cfg.TimeoutMs, c.emitCh) }()
 }
 
 // holdForDuration waits for the specified duration while respecting ctx cancellation.

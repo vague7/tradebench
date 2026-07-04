@@ -64,7 +64,7 @@ export function MetricsPanel({ snapshot, score }: MetricsPanelProps) {
   const metrics: MetricDef[] = [
     {
       label: 'Final Score',
-      value: score ? (score.finalScore * 100).toFixed(1) : '—',
+      value: score ? (score.finalScore * 100).toFixed(2) : '—',
       unit: score ? 'pts' : undefined,
       severity: 'default',
     },
